@@ -48,7 +48,7 @@ Your PHP needs:
  - SQLite
  - apcu\_cache
 
-Upload `app.php`, `templates`, `uploads`, and `www`.
+Set up dependencies, database, and website URL:
 
 ```
 $ composer install
