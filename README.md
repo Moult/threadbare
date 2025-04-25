@@ -5,7 +5,7 @@ Threadbare is a [frugal](https://idlewords.com/talks/website_obesity.htm) PHP + 
 Threadbare is:
 
  - Free software (AGPL-3.0-or-later)
- - A single PHP (i.e. easy to host) file about a thousand line long with zero boilerplate or design patterns.
+ - A single PHP (i.e. easy to host) file about a thousand lines long with zero boilerplate or design patterns.
  - Uses SQLite. Unless you have a thousand new posts a day, you're not going to notice.
  - 100% works without [JavaScript](https://tonsky.me/blog/js-bloat/). Conservatively optionally enhanced with up to 70KB (before gzip) on the heaviest page.
  - Very semantic HTML. Best viewed in [elinks](https://thinkmoult.com/using-elinks-browse-web.html).
@@ -19,7 +19,7 @@ Threadbare is not:
  - It isn't a fully featured forum. If you're looking for plugins, themes, and a hundred dials, this isn't it.
  - No logging and community metrics.
  - Non-hierarchical. It's just threads and posts. No categories or subcategories.
- - No private messages, profiles, or gamification. Take a deep breath. Enjoy the prose.
+ - No private messages, profiles, or gamification. Take a deep breath. Enjoy the open-air prose.
  - Not tested. Let me know if you find any issues.
 
 Features:
@@ -36,7 +36,7 @@ Features:
  - User mentions with tab autocomplete and email notifications.
  - Login, sign up, reset password, validation emails.
  - Captcha and Akismet.
- - Agressive caching especially for guests (using APCu cache).
+ - Aggressive caching especially for guests (using APCu cache).
  - Pagination.
  - Last read stats, views, last reply.
 
