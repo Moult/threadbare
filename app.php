@@ -758,7 +758,6 @@ function getThreadId(PDO $db, int $postId): int
 
 function tryRenderFromCache($key): void
 {
-    return;
     $cacheKey = 'html_' . ($_SESSION['user_id'] ?? '') . '_' . $key . '_' . sha1($_SERVER['REQUEST_URI']);
     $html = apcu_fetch($cacheKey);
     if ($html !== false) {

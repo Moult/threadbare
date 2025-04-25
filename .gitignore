@@ -1,6 +1,7 @@
-*.db
+*.db*
 *.swp
 *.phar
 !uploads/.gitkeep
 uploads/*
 config.php
+vendor/*
