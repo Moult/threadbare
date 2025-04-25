@@ -1,0 +1,27 @@
+{{>header}}
+<p>
+    Welcome to the <strong>OSArch Community</strong>
+</p>
+<p>
+    This is a discussion forum for architects, engineers, builders, planners, and professionals interested in free software for the built environment.
+</p>
+<ol class="threads">
+    {{#threads}}
+    <li class="thread{{#is_unread}} unread{{/is_unread}}">
+        <span class="avatar {{avatar}}">{{initial}}</span>
+        <span class="thread-title"><a href="{{baseurl}}thread/{{id}}">{{title}}</a></span>{{#is_unread}}<small> (New)</small>{{/is_unread}}<br />
+        <span class="metadata">by <strong>{{username}}</strong>, <strong>{{views}}</strong> views, <strong>{{total_posts}}</strong> replies, most recent by <strong>{{username}}</strong> {{ts_updated}}</span>
+    </li>
+    {{/threads}}
+</ol>
+{{#has_pagination}}
+<p>
+Go to page:
+</p>
+<ol class="pagination">
+    {{#pages}}
+    <li{{#is_active}} class="active"{{/is_active}}>{{#page}}<a href="{{baseurl}}p{{page}}">{{page}}</a>{{/page}}{{^page}}<span>…</span>{{/page}}</li>
+    {{/pages}}
+</ol>
+{{/has_pagination}}
+{{>footer}}

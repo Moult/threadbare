@@ -1,0 +1,69 @@
+{{>header}}
+<h2>{{title}}</h2>
+{{#posts}}
+<ol class="posts">
+    <li class="post">
+        <a id="{{id}}"></a>
+        <span class="avatar {{avatar}}">{{initial}}</span>
+        <span class="metadata">
+            by <strong>{{username}}</strong> on <strong>{{ts_created}}</strong>{{#ts_updated}}, edited <strong>{{ts_updated}}</strong>{{/ts_updated}}
+            <a href="{{baseurl}}thread/{{thread_id}}#{{id}}">#</a>
+            {{#can_edit}}
+            <a href="{{baseurl}}post/edit/{{id}}">edit</a>
+            {{/can_edit}}
+            {{#has_votes}}
+            {{#upvotes}}+{{upvotes}}{{/upvotes}} {{#downvotes}}-{{downvotes}}{{/downvotes}} votes 
+            {{/has_votes}}
+            {{#user_vote}}
+            {{#user_upvote}}
+            &blacktriangle;
+            {{/user_upvote}}
+            {{^user_upvote}}
+            &blacktriangledown;
+            {{/user_upvote}}
+            {{/user_vote}}
+<form action="{{baseurl}}vote" method="post" class="vote-form">
+  <input type="hidden" name="csrf" value="{{csrf}}">
+  <input type="hidden" name="post_id" value="{{id}}">
+  <input type="hidden" name="page" value="{{page}}">
+  <button name="vote" value="1" {{#user_vote_is_upvoted}}disabled{{/user_vote_is_upvoted}}>&blacktriangle;</button>
+  <button name="vote" value="-1" {{#user_vote_is_downvoted}}disabled{{/user_vote_is_downvoted}}>&blacktriangledown;</button>
+</form>
+        </span>
+        <article>
+            {{{content}}}
+        </article>
+    </li>
+</ol>
+{{/posts}}
+{{#has_pagination}}
+<p>
+Go to page:
+</p>
+<ol class="pagination">
+    {{#pages}}
+    <li{{#is_active}} class="active"{{/is_active}}>{{#page}}<a href="{{baseurl}}thread/{{id}}/p{{page}}">{{page}}</a>{{/page}}{{^page}}<span>…</span>{{/page}}</li>
+    {{/pages}}
+</ol>
+{{/has_pagination}}
+{{#is_logged_in}}
+<p>Posts can be formatted using <a href="#">Markdown</a>.</p>
+<p><a href="{{baseurl}}upload" id="upload-link">Attach file?</a> <small>(images, txt, zip, pdf, and ifc)</small></p>
+{{#has_error}}
+<p><strong>Uh oh</strong>. Post content must not be blank or exceed 5000 characters.</p>
+{{/has_error}}
+<form action="" method="post">
+    <input type="hidden" name="csrf" value="{{csrf}}" />
+    <textarea name="content" id="content"></textarea>
+    <input type="submit" value="Reply" />
+</form>
+<script src="{{baseurl}}marked.min.js"></script>
+<script src="{{baseurl}}purify.min.js"></script>
+<script src="{{baseurl}}post.js"></script>
+{{/is_logged_in}}
+{{^is_logged_in}}
+<p>
+    <a href="{{baseurl}}login">Login or Register</a> to reply.
+</p>
+{{/is_logged_in}}
+{{>footer}}

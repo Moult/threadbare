@@ -1,0 +1,7 @@
+{
+    "require": {
+        "mustache/mustache": "^2.14",
+        "erusev/parsedown": "^1.7",
+        "sendgrid/sendgrid": "^8.1"
+    }
+}

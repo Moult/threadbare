@@ -1,0 +1,13 @@
+{{>header}}
+<h2>Upload</h2>
+{{#filename}}
+<p>Your file is now uploaded at <a href="{{baseurl}}files/{{filename}}">this link</a>:</p>
+<pre>{{baseurl}}files/{{filename}}</pre>
+{{/filename}}
+<p>No more than 5MB per attachment.</p>
+<form action="{{baseurl}}upload" method="POST" enctype="multipart/form-data">
+    <input type="hidden" name="csrf" value="{{csrf}}">
+    <input type="file" name="attachment" accept=".jpg,.jpeg,.png,.txt,.ifc,.zip,.pdf">
+    <input type="submit" value="Upload">
+</form>
+{{>footer}}

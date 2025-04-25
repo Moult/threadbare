@@ -1,0 +1,23 @@
+{{>header}}
+<h2>New Post</h2>
+{{#has_error}}
+<p><strong>Uh oh</strong>. Your post has issues:</p>
+<ul class="errors">
+{{#errors}}
+    <li>{{.}}</li>
+{{/errors}}
+</ul>
+{{/has_error}}
+<form action="{{baseurl}}post" method="post">
+    <input type="hidden" name="csrf" value="{{csrf}}" />
+    <label for="title">Title</label>
+    <input type="text" name="title" value="{{title}}" placeholder="Summarise your topic or question" />
+    <p>Posts can be formatted using <a href="#">Markdown</a>.</p>
+    <p><a href="{{baseurl}}upload" id="upload-link">Attach file?</a> <small>(images, txt, zip, pdf, and ifc)</small></p>
+    <textarea name="content" id="content">{{content}}</textarea>
+    <input type="submit" value="Post" />
+</form>
+<script src="{{baseurl}}marked.min.js"></script>
+<script src="{{baseurl}}purify.min.js"></script>
+<script src="{{baseurl}}post.js"></script>
+{{>footer}}

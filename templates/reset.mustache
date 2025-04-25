@@ -1,0 +1,41 @@
+{{>header}}
+<h2>Reset password</h2>
+{{#code}}
+{{#is_valid_code}}
+{{#is_success}}
+<p>Your password has been updated. You can now <a href="{{baseurl}}login">login</a>.</p>
+{{/is_success}}
+{{^is_success}}
+<form action="{{baseurl}}reset/{{code}}" method="post">
+    <input type="hidden" name="csrf" value="{{csrf}}" />
+    <label for="password">Password</label>
+    <input type="password" name="password" />
+    <label for="password2">Password Again</label>
+    <input type="password" name="password2" />
+    <input type="submit" value="Change Password" />
+</form>
+{{/is_success}}
+{{/is_valid_code}}
+{{^is_valid_code}}
+<p>The reset code is incorrect, expired, or already used.</p>
+{{/is_valid_code}}
+{{/code}}
+{{^code}}
+{{#is_sent}}
+<p><strong>Cheers!</strong> If your account exists in our system, we've just sent you a password reset email.</p>
+{{/is_sent}}
+{{^is_sent}}
+<p>We'll send you an email with a one-time reset code.</p>
+{{/is_sent}}
+<script src='https://www.hCaptcha.com/1/api.js' async defer></script>
+<form action="{{baseurl}}reset" method="post">
+    <input type="hidden" name="csrf" value="{{csrf}}" />
+    <label for="email">Email</label>
+    <input type="email" name="email" />
+    <p>
+        Are you human?
+    </p>
+    <div class="h-captcha" data-sitekey="{{captcha}}"></div>
+    <input type="submit" value="Reset Password" />
+</form>
+{{/code}}

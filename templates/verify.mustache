@@ -1,0 +1,27 @@
+{{>header}}
+<script src='https://www.hCaptcha.com/1/api.js' async defer></script>
+<h2>Verify account</h2>
+{{#code}}
+{{#is_success}}
+<p>Your account is now verified. You can now <a href="{{baseurl}}login">login</a>.</p>
+{{/is_success}}
+{{^is_success}}
+<p>The verification code is incorrect, expired, or already used.</p>
+{{/is_success}}
+{{>footer}}
+{{/code}}
+{{^code}}
+{{#is_sent}}
+<p><strong>Cheers!</strong> We've just sent you a verification email. Verify your account then you can sign in.</p>
+{{/is_sent}}
+<form action="{{baseurl}}verify" method="post">
+    <input type="hidden" name="csrf" value="{{csrf}}" />
+    <label for="email">Email</label>
+    <input type="email" name="email" />
+    <p>
+        Are you human?
+    </p>
+    <div class="h-captcha" data-sitekey="{{captcha}}"></div>
+    <input type="submit" value="Resend Verification" />
+</form>
+{{/code}}
