@@ -40,8 +40,6 @@ if (isset($_SESSION['username'])) {
 function checkCsrf($mustache, &$data)
 {
     if (!isset($_POST['csrf']) || !hash_equals($_SESSION['csrf'], $_POST['csrf'])) {
-        var_dump($_POST['csrf']);
-        var_dump($_SESSION['csrf']);
         http_response_code(403);
         echo $mustache->render('403', $data);
         exit;
@@ -373,10 +371,13 @@ function validateThread(&$errors)
     }
 }
 
-function validatePost(&$errors)
+function validatePost($config, $baseurl, &$errors)
 {
     if (!isset($_POST['content']) || !is_string($_POST['content']) || strlen($_POST['content']) < 1 || strlen($_POST['content']) > 5000) {
         $errors[] = 'Post content must not be blank or exceed 5000 characters.';
+    }
+    if (!in_array($_SESSION['username'], $config['adminUsernames']) && !in_array($_SESSION['username'], $config['trustedUsernames']) && isset($_POST['content']) && $_POST['content'] && isSpam($config, $baseurl)) {
+        $errors[] = 'Post content looks spamlike. Please reach out for help in the live chat.';
     }
 }
 
@@ -764,6 +765,44 @@ function getThreadId(PDO $db, int $postId): int
     return (int) $query->fetchColumn();
 }
 
+function isSpam($config, $baseurl)
+{
+    $request = 'api_key=' . urlencode($config['akismetKey'])
+        . '&blog=' . urlencode($baseurl)
+        . '&user_ip=' . urlencode($_SERVER['REMOTE_ADDR'])
+        . '&user_agent=' . urlencode($_SERVER['HTTP_USER_AGENT'])
+        . '&referrer=' . urlencode($_SERVER['HTTP_REFERER'])
+        . '&comment_type=comment'
+        . '&comment_author=' . urlencode($_SESSION['username'])
+        . '&comment_content=' . urlencode($_POST['content']);
+
+    $host = $http_host = 'rest.akismet.com';
+    $path = '/1.1/comment-check';
+    $port = 443;
+    $akismet_ua = 'WordPress/4.4.1 | Akismet/3.1.7';
+    $content_length = strlen($request);
+    $http_request = "POST $path HTTP/1.0\r\n";
+    $http_request .= "Host: $host\r\n";
+    $http_request .= "Content-Type: application/x-www-form-urlencoded\r\n";
+    $http_request .= "Content-Length: {$content_length}\r\n";
+    $http_request .= "User-Agent: {$akismet_ua}\r\n";
+    $http_request .= "\r\n";
+    $http_request .= $request;
+
+    $response = '';
+    if (false != ($fs = @fsockopen('ssl://' . $http_host, $port, $errno, $errstr, 10))) {
+        fwrite($fs, $http_request);
+        while (!feof($fs)) {
+            $response .= fgets($fs, 1160);  // One TCP-IP packet
+        }
+        fclose($fs);
+        $response = explode("\r\n\r\n", $response, 2);
+    }
+    if ('true' == $response[1])
+        return true;
+    return false;
+}
+
 function tryRenderFromCache($key): void
 {
     $cacheKey = 'html_' . ($_SESSION['user_id'] ?? '') . '_' . $key . '_' . sha1($_SERVER['REQUEST_URI']);
@@ -842,7 +881,6 @@ class ForumMarkdown extends Parsedown
                             ],
                         ),
                     );
-                    var_dump($element);
                 }
             }
             return $element;
@@ -973,7 +1011,7 @@ if ($method === 'GET' && preg_match('/^(p[0-9]{1,3})?$/', $uri, $queryString)) {
     checkRateLimit($mustache, $data, 'post', 5, 10);
     $data['errors'] = [];
     validateThread($data['errors']);
-    validatePost($data['errors']);
+    validatePost($config, $baseurl, $data['errors']);
     if (count($data['errors']) === 0) {
         checkRateLimit($mustache, $data, 'post-success', 5, 300);
         $threadId = addThread($db);
@@ -983,6 +1021,7 @@ if ($method === 'GET' && preg_match('/^(p[0-9]{1,3})?$/', $uri, $queryString)) {
         redirect($baseurl . 'thread/' . $threadId);
     } else {
         $data['has_error'] = TRUE;
+        $data['title'] = $_POST['title'];
         $data['content'] = $_POST['content'];
         echo $mustache->render('post', $data);
     }
@@ -1021,7 +1060,7 @@ if ($method === 'GET' && preg_match('/^(p[0-9]{1,3})?$/', $uri, $queryString)) {
     }
     $threadId = (int) $queryString[1];
     $data['errors'] = [];
-    validatePost($data['errors']);
+    validatePost($config, $baseurl, $data['errors']);
     if (count($data['errors']) === 0) {
         $postId = addPost($db, $threadId);
         sendNotificationEmails($db, $threadId, $baseurl, $config['sendGridKey']);
@@ -1063,7 +1102,7 @@ if ($method === 'GET' && preg_match('/^(p[0-9]{1,3})?$/', $uri, $queryString)) {
     }
     $data['content'] = $_POST['content'];
     $data['errors'] = [];
-    validatePost($data['errors']);
+    validatePost($config, $baseurl, $data['errors']);
     if (count($data['errors']) === 0) {
         checkRateLimit($mustache, $data, 'postedit', 5, 300);
         updatePost($db, $postId);

@@ -1,7 +1,9 @@
 <?php
 return [
+    'akismetKey' => '',
     'sendGridKey' => '',
     'hCaptchaSiteKey' => '',
     'hCaptchaSecretKey' => '',
     'adminUsernames' => [],
+    'trustedUsernames' => [],
 ];

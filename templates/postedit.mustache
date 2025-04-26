@@ -3,7 +3,12 @@
 <p>Alternatively, <a href="{{baseurl}}post/delete/{{id}}">delete this post</a>.</p>
 <p>Replies can be formatted using <a href="#">Markdown</a>.</p>
 {{#has_error}}
-<p><strong>Uh oh</strong>. Post content must not be blank or exceed 5000 characters.</p>
+<p><strong>Uh oh</strong>. Your post has issues:</p>
+<ul class="errors">
+{{#errors}}
+    <li>{{.}}</li>
+{{/errors}}
+</ul>
 {{/has_error}}
 <form action="{{baseurl}}post/edit/{{id}}" method="post">
     <input type="hidden" name="csrf" value="{{csrf}}" />
