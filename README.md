@@ -9,7 +9,7 @@ Threadbare is:
  - Uses SQLite. Unless you have a thousand new posts a day, you're not going to notice.
  - 100% works without [JavaScript](https://tonsky.me/blog/js-bloat/). Conservatively optionally enhanced with up to 70KB (before gzip) on the heaviest page.
  - Very semantic HTML. Best viewed in [elinks](https://thinkmoult.com/using-elinks-browse-web.html).
- - Page load in 50 milliseconds. 5ms if cached. Basically like a static website.
+ - Heaviest page load in 25 milliseconds. 2ms if cached. Basically like a static website.
  - Opinionated. There are no settings.
  - Relies on SendGrid for email and hCaptcha / Akismet for bots.
  - Secure. I think. I hope. Let me know if it isn't.
@@ -37,7 +37,7 @@ Features:
  - Login, sign up, reset password, validation emails.
  - Captcha and Akismet.
  - Admins can edit / delete others. Trusted users bypass spam filters.
- - Aggressive caching especially for guests (using APCu cache).
+ - Aggressive caching for guests (using APCu cache).
  - Pagination.
  - Last read stats, views, last reply.
 

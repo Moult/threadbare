@@ -755,7 +755,6 @@ function markThreadAsRead(PDO $db, int $threadId): void
         ':thread_id' => $threadId,
         ':now' => $now,
     ]);
-    invalidateCache(['index']);
 }
 
 function getThreadId(PDO $db, int $postId): int
@@ -805,29 +804,25 @@ function isSpam($config, $baseurl)
 
 function tryRenderFromCache($key): void
 {
-    $cacheKey = 'html_' . ($_SESSION['user_id'] ?? '') . '_' . $key . '_' . sha1($_SERVER['REQUEST_URI']);
-    $html = apcu_fetch($cacheKey);
+    if ($_SESSION['user_id']) return;
+    $html = apcu_fetch('html_' . $key . '_' . sha1($_SERVER['REQUEST_URI']));
     if ($html !== false) {
         echo $html;
         exit;
     }
 }
 
-function saveCache($key, string $html, int $ttl = 300): void
+function saveCache($key, string $html, int $ttl = 900): void
 {
-    $cacheKey = 'html_' . ($_SESSION['user_id'] ?? '') . '_' . $key . '_' . sha1($_SERVER['REQUEST_URI']);
-    apcu_store($cacheKey, $html, $ttl);
+    apcu_store('html_' . $key . '_' . sha1($_SERVER['REQUEST_URI']), $html, $ttl);
 }
 
 function invalidateCache($keys)
 {
-    $userId = ($_SESSION['user_id'] ?? '');
-    if (!$userId)
-        return;
     $cacheKeys = apcu_cache_info()['cache_list'] ?? [];
     foreach ($cacheKeys as $item) {
         foreach ($keys as $key) {
-            if (str_starts_with($item['info'], 'html_' . $userId . '_' . $key)) {  // Omit _ suffix to allow wildcard
+            if (str_starts_with($item['info'], 'html_' . $key)) {  // Omit _ suffix to allow wildcard
                 apcu_delete($item['info']);
             }
         }
@@ -1065,7 +1060,7 @@ if ($method === 'GET' && preg_match('/^(p[0-9]{1,3})?$/', $uri, $queryString)) {
         $postId = addPost($db, $threadId);
         sendNotificationEmails($db, $threadId, $baseurl, $config['sendGridKey']);
         $totalPages = ceil(getTotalPosts($db, $threadId) / $perPage);
-        invalidateCache(['index', 'thread/' . $threadId . '/p']);
+        invalidateCache(['index', 'thread/' . $threadId . '/p' . $totalPages]);
         redirect($baseurl . 'thread/' . $threadId . '/p' . $totalPages . '#' . $postId);
     } else {
         $data['has_error'] = TRUE;
@@ -1150,7 +1145,6 @@ if ($method === 'GET' && preg_match('/^(p[0-9]{1,3})?$/', $uri, $queryString)) {
     }
 
     $threadId = getThreadId($db, $postId);
-    invalidateCache(['thread/' . $threadId . '/p']);
     redirect($baseurl . 'thread/' . $threadId . '/p' . $page . '#' . $postId);
 } else if ($method === 'GET' && preg_match('/^mention(\/[0-9]{1,50})?\/@([A-Za-z0-9_-]{1,100})$/', $uri, $queryString)) {
     $limit = 5;
