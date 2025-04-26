@@ -39,11 +39,8 @@ if (isset($_SESSION['username'])) {
 
 function checkCsrf($mustache, &$data)
 {
-    if (!isset($_POST['csrf']) || !hash_equals($_SESSION['csrf'], $_POST['csrf'])) {
-        http_response_code(403);
-        echo $mustache->render('403', $data);
-        exit;
-    }
+    if (!isset($_POST['csrf']) || !hash_equals($_SESSION['csrf'], $_POST['csrf']))
+        render(403, '403', $mustache, $data);
     $_SESSION['csrf'] = bin2hex(random_bytes(32));
     $data['csrf'] = $_SESSION['csrf'];
 }
@@ -60,11 +57,8 @@ function checkRateLimit($mustache, $data, $key = 'login', $limit = 3, $window = 
 
     if (($now - $record['time']) < $window) {
         $record['attempts']++;
-        if ($record['attempts'] > $limit) {
-            http_response_code(429);
-            echo $mustache->render('429', $data);
-            exit;
-        }
+        if ($record['attempts'] > $limit)
+            render(429, '429', $mustache, $data);
     } else {
         $record = ['attempts' => 1, 'time' => $now];
     }
@@ -72,10 +66,7 @@ function checkRateLimit($mustache, $data, $key = 'login', $limit = 3, $window = 
 
 function checkCaptcha($mustache, $config)
 {
-    $data = array(
-        'secret' => $config['hCaptchaSecretKey'],
-        'response' => $_POST['h-captcha-response']
-    );
+    $data = array('secret' => $config['hCaptchaSecretKey'], 'response' => $_POST['h-captcha-response']);
     $verify = curl_init();
     curl_setopt($verify, CURLOPT_URL, 'https://hcaptcha.com/siteverify');
     curl_setopt($verify, CURLOPT_POST, true);
@@ -83,11 +74,8 @@ function checkCaptcha($mustache, $config)
     curl_setopt($verify, CURLOPT_RETURNTRANSFER, true);
     $response = curl_exec($verify);
     $responseData = json_decode($response);
-    if (!$responseData->success) {
-        http_response_code(403);
-        echo $mustache->render('403', $data);
-        exit;
-    }
+    if (!$responseData->success)
+        render(403, '403', $mustache, $data);
 }
 
 function validateLogin($db)
@@ -561,12 +549,10 @@ function getThread($config, $mustache, $db, $threadId, $page, $perPage, &$data)
     $query->bindValue(':id', $threadId);
     $query->execute();
     $row = $query->fetch();
-    if (!$row) {
-        http_response_code(404);
-        echo $mustache->render('404', $data);
-        exit;
-    }
+    if (!$row)
+        render(404, '404', $mustache, $data);
     $data['title'] = $row['title'];
+    $data['can_edit'] = isset($_SESSION['user_id']) ? $row['user_id'] === $_SESSION['user_id'] || in_array($_SESSION['username'], $config['adminUsernames']) : FALSE;
     $data['posts'] = [];
 
     $query = $db->prepare('
@@ -676,11 +662,8 @@ function deleteThread($db, $id)
 
 function handleUpload($db)
 {
-    if (!isset($_FILES['attachment']) || $_FILES['attachment']['error'] !== UPLOAD_ERR_OK) {
-        http_response_code(400);
-        echo $mustache->render('400', $data);
-        exit;
-    }
+    if (!isset($_FILES['attachment']) || $_FILES['attachment']['error'] !== UPLOAD_ERR_OK)
+        render(400, '400', $mustache, $data);
 
     $file = $_FILES['attachment'];
 
@@ -706,18 +689,13 @@ function handleUpload($db)
     } elseif (isset($allowedTypes[$mime])) {
         $ext = $allowedTypes[$mime];
     } else {
-        http_response_code(403);
-        echo $mustache->render('403', $data);
-        exit;
+        render(403, '403', $mustache, $data);
     }
 
     if ($ext === 'ifc') {
         $contents = file_get_contents($file['tmp_name']);
-        if (!str_starts_with(trim($contents), 'ISO-10303-21;')) {
-            http_response_code(400);
-            echo $mustache->render('400', $data);
-            exit;
-        }
+        if (!str_starts_with(trim($contents), 'ISO-10303-21;'))
+            render(400, '400', $mustache, $data);
     }
 
     $filename = bin2hex(random_bytes(16)) . '.' . $ext;
@@ -726,11 +704,8 @@ function handleUpload($db)
     if (!is_dir($uploadDir)) {
         mkdir($uploadDir, 0755, TRUE);
     }
-    if (!move_uploaded_file($file['tmp_name'], $uploadDir . DIRECTORY_SEPARATOR . $filename)) {
-        http_response_code(500);
-        echo $mustache->render('500', $data);
-        exit;
-    }
+    if (!move_uploaded_file($file['tmp_name'], $uploadDir . DIRECTORY_SEPARATOR . $filename))
+        render(500, '500', $mustache, $data);
     return $subdir . '/' . $filename;
 }
 
@@ -804,7 +779,8 @@ function isSpam($config, $baseurl)
 
 function tryRenderFromCache($key): void
 {
-    if ($_SESSION['user_id']) return;
+    if ($_SESSION['user_id'])
+        return;
     $html = apcu_fetch('html_' . $key . '_' . sha1($_SERVER['REQUEST_URI']));
     if ($html !== false) {
         echo $html;
@@ -834,6 +810,16 @@ function avatar(string $username): string
     $colors = ['coral', 'denim', 'amber', 'teal', 'violet', 'sage', 'maroon', 'sunflower', 'ocean', 'charcoal'];
     $index = crc32($username) % count($colors);
     return 'avatar-' . $colors[$index];
+}
+
+function render($code, $template, $mustache, $data, $cacheKey = NULL)
+{
+    http_response_code($code);
+    $html = $mustache->render($template, $data);
+    echo $html;
+    if ($cacheKey)
+        saveCache($cacheKey, $html);
+    exit;
 }
 
 class ForumMarkdown extends Parsedown
@@ -894,11 +880,9 @@ if ($method === 'GET' && preg_match('/^(p[0-9]{1,3})?$/', $uri, $queryString)) {
     $totalPages = ceil(getTotalThreads($db) / $perPage);
     $data['has_pagination'] = $totalPages > 1;
     $data['pages'] = getPaginationPages($page, $totalPages);
-    $html = $mustache->render('index', $data);
-    saveCache('index', $html);
-    echo $html;
+    render(200, 'index', $mustache, $data, 'index');
 } else if ($method === 'GET' && $uri === 'login') {
-    echo $mustache->render('login', $data);
+    render(200, 'login', $mustache, $data);
 } else if ($method === 'POST' && $uri === 'login') {
     checkCsrf($mustache, $data);
     checkRateLimit($mustache, $data, 'login', 3, 300);
@@ -906,11 +890,10 @@ if ($method === 'GET' && preg_match('/^(p[0-9]{1,3})?$/', $uri, $queryString)) {
     if ($userId !== FALSE) {
         login($userId);
         redirect($baseurl);
-    } else {
-        $data['has_login_error'] = TRUE;
-        $data['username'] = isset($_POST['username']) ? $_POST['username'] : '';
-        echo $mustache->render('login', $data);
     }
+    $data['has_login_error'] = TRUE;
+    $data['username'] = isset($_POST['username']) ? $_POST['username'] : '';
+    render(400, 'login', $mustache, $data);
 } else if ($method === 'POST' && $uri === 'register') {
     checkCsrf($mustache, $data);
     checkRateLimit($mustache, $data, 'register', 5, 300);
@@ -919,42 +902,34 @@ if ($method === 'GET' && preg_match('/^(p[0-9]{1,3})?$/', $uri, $queryString)) {
     if (count($data['errors']) === 0) {
         $userId = addUser($db);
         $code = generateVerification($db, $userId);
-        if (sendVerificationEmail($_POST['email'], $baseurl, $code, $config['sendGridKey']) === FALSE) {
-            http_response_code(500);
-            echo $mustache->render('500', $data);
-            exit;
-        } else {
-            $data['is_sent'] = TRUE;
-            echo $mustache->render('verify', $data);
-        }
-    } else {
-        $data['has_register_errors'] = TRUE;
-        $data['username'] = isset($_POST['username']) ? $_POST['username'] : '';
-        $data['email'] = isset($_POST['email']) ? $_POST['email'] : '';
-        $data['answer'] = isset($_POST['answer']) ? $_POST['answer'] : '';
-        echo $mustache->render('login', $data);
+        if (sendVerificationEmail($_POST['email'], $baseurl, $code, $config['sendGridKey']) === FALSE)
+            render(500, '500', $mustache, $data);
+        $data['is_sent'] = TRUE;
+        render(200, 'verify', $mustache, $data);
     }
+    $data['has_register_errors'] = TRUE;
+    $data['username'] = isset($_POST['username']) ? $_POST['username'] : '';
+    $data['email'] = isset($_POST['email']) ? $_POST['email'] : '';
+    $data['answer'] = isset($_POST['answer']) ? $_POST['answer'] : '';
+    render(400, 'login', $mustache, $data);
 } else if ($method === 'GET' && $uri == 'reset') {
-    echo $mustache->render('reset', $data);
+    render(200, 'reset', $mustache, $data);
 } else if ($method === 'POST' && $uri == 'reset') {
     checkCsrf($mustache, $data);
     checkRateLimit($mustache, $data, 'verify', 3, 300);
     $user = getUserByEmail($db, empty($_POST['email']) ? '' : $_POST['email']);
     if ($user) {
         $code = generateVerification($db, $user['id']);
-        if (sendResetEmail($user['email'], $baseurl, $code, $config['sendGridKey']) === FALSE) {
-            http_response_code(500);
-            echo $mustache->render('500', $data);
-            exit;
-        }
+        if (sendResetEmail($user['email'], $baseurl, $code, $config['sendGridKey']) === FALSE)
+            render(500, '500', $mustache, $data);
     }
     $data['is_sent'] = TRUE;
-    echo $mustache->render('reset', $data);
+    render(200, 'reset', $mustache, $data);
 } else if ($method === 'GET' && preg_match('/^reset\/([A-Za-z0-9]{1,100})$/', $uri, $queryString)) {
     $data['code'] = $queryString[1];
     $data['is_valid_code'] = (bool) checkVerificationCode($db, $queryString[1]);
     $data['is_valid_code'] = TRUE;
-    echo $mustache->render('reset', $data);
+    render(200, 'reset', $mustache, $data);
 } else if ($method === 'POST' && preg_match('/^reset\/([A-Za-z0-9]{1,100})$/', $uri, $queryString)) {
     checkCsrf($mustache, $data);
     checkRateLimit($mustache, $data, 'reset', 3, 300);
@@ -968,9 +943,9 @@ if ($method === 'GET' && preg_match('/^(p[0-9]{1,3})?$/', $uri, $queryString)) {
             $data['is_success'] = TRUE;
         }
     }
-    echo $mustache->render('reset', $data);
+    render(200, 'reset', $mustache, $data);
 } else if ($method === 'GET' && $uri == 'verify') {
-    echo $mustache->render('verify', $data);
+    render(200, 'verify', $mustache, $data);
 } else if ($method === 'POST' && $uri == 'verify') {
     checkCsrf($mustache, $data);
     checkRateLimit($mustache, $data, 'verify', 3, 300);
@@ -978,18 +953,15 @@ if ($method === 'GET' && preg_match('/^(p[0-9]{1,3})?$/', $uri, $queryString)) {
     $user = getUserByEmail($db, empty($_POST['email']) ? '' : $_POST['email']);
     if ($user) {
         $code = generateVerification($db, $user['id']);
-        if (sendVerificationEmail($user['email'], $baseurl, $code, $config['sendGridKey']) === FALSE) {
-            http_response_code(500);
-            echo $mustache->render('500', $data);
-            exit;
-        }
+        if (sendVerificationEmail($user['email'], $baseurl, $code, $config['sendGridKey']) === FALSE)
+            render(500, '500', $mustache, $data);
     }
     $data['is_sent'] = TRUE;
-    echo $mustache->render('verify', $data);
+    render(200, 'verify', $mustache, $data);
 } else if ($method === 'GET' && preg_match('/^verify\/([A-Za-z0-9]{1,100})$/', $uri, $queryString)) {
     $data['code'] = $queryString[1];
     $data['is_success'] = verifyUser($db, $queryString[1]);
-    echo $mustache->render('verify', $data);
+    render(200, 'verify', $mustache, $data);
 } else if ($method === 'GET' && $uri === 'logout') {
     unset($_SESSION['username']);
     session_unset();
@@ -997,8 +969,8 @@ if ($method === 'GET' && preg_match('/^(p[0-9]{1,3})?$/', $uri, $queryString)) {
     redirect($baseurl);
 } else if ($method === 'GET' && $uri === 'post') {
     if (!$data['is_logged_in'])
-        return redirect($baseurl . 'login');
-    echo $mustache->render('post', $data);
+        redirect($baseurl . 'login');
+    render(200, 'post', $mustache, $data);
 } else if ($method === 'POST' && $uri === 'post') {
     if (!$data['is_logged_in'])
         return redirect($baseurl . 'login');
@@ -1014,12 +986,11 @@ if ($method === 'GET' && preg_match('/^(p[0-9]{1,3})?$/', $uri, $queryString)) {
         sendNotificationEmails($db, $threadId, $baseurl, $config['sendGridKey']);
         invalidateCache(['index']);
         redirect($baseurl . 'thread/' . $threadId);
-    } else {
-        $data['has_error'] = TRUE;
-        $data['title'] = $_POST['title'];
-        $data['content'] = $_POST['content'];
-        echo $mustache->render('post', $data);
     }
+    $data['has_error'] = TRUE;
+    $data['title'] = $_POST['title'];
+    $data['content'] = $_POST['content'];
+    render(400, 'post', $mustache, $data);
 } else if ($method === 'GET' && preg_match('/^thread\/([0-9]{1,50})\/latest$/', $uri, $queryString)) {
     $threadId = (int) $queryString[1];
     $totalPages = ceil(getTotalPosts($db, $threadId) / $perPage);
@@ -1042,9 +1013,7 @@ if ($method === 'GET' && preg_match('/^(p[0-9]{1,3})?$/', $uri, $queryString)) {
         markThreadAsRead($db, $threadId);
     }
     $data['id'] = $threadId;
-    $html = $mustache->render('thread', $data);
-    saveCache($cacheKey, $html);
-    echo $html;
+    render(200, 'thread', $mustache, $data, $cacheKey);
 } else if ($method === 'POST' && preg_match('/^thread\/([0-9]{1,50})(\/(p[0-9]{1,3})?)?$/', $uri, $queryString)) {
     if (!$data['is_logged_in'])
         return redirect($baseurl . 'login');
@@ -1062,38 +1031,26 @@ if ($method === 'GET' && preg_match('/^(p[0-9]{1,3})?$/', $uri, $queryString)) {
         $totalPages = ceil(getTotalPosts($db, $threadId) / $perPage);
         invalidateCache(['index', 'thread/' . $threadId . '/p' . $totalPages]);
         redirect($baseurl . 'thread/' . $threadId . '/p' . $totalPages . '#' . $postId);
-    } else {
-        $data['has_error'] = TRUE;
-        getThread($config, $mustache, $db, $threadId, $page, $perPage, $data);
-        $data['id'] = $threadId;
-        $totalPages = ceil(getTotalPosts($db, $threadId) / $perPage);
-        $data['page'] = $page;
-        $data['has_pagination'] = $totalPages > 1;
-        $data['pages'] = getPaginationPages($page, $totalPages);
-        echo $mustache->render('thread', $data);
     }
-} else if ($method === 'GET' && preg_match('/^post\/edit\/([0-9]{1,100})$/', $uri, $queryString)) {
+    $data['has_error'] = TRUE;
+    getThread($config, $mustache, $db, $threadId, $page, $perPage, $data);
+    $data['id'] = $threadId;
+    $totalPages = ceil(getTotalPosts($db, $threadId) / $perPage);
+    $data['page'] = $page;
+    $data['has_pagination'] = $totalPages > 1;
+    $data['pages'] = getPaginationPages($page, $totalPages);
+    render(400, 'thread', $mustache, $data, $cacheKey);
+} else if (in_array($method, ['GET', 'POST']) && preg_match('/^post\/edit\/([0-9]{1,100})$/', $uri, $queryString)) {
     if (!$data['is_logged_in'])
         return redirect($baseurl . 'login');
     $postId = (int) $queryString[1];
     $post = getPost($config, $db, $postId);
-    if (!$post) {
-        http_response_code(404);
-        echo $mustache->render('404', $data);
-        exit;
-    }
+    if (!$post)
+        return render(404, '404', $mustache, $data);
     $data['id'] = $postId;
-    $data['content'] = $post['content'];
-    echo $mustache->render('postedit', $data);
-} else if ($method === 'POST' && preg_match('/^post\/edit\/([0-9]{1,100})$/', $uri, $queryString)) {
-    if (!$data['is_logged_in'])
-        return redirect($baseurl . 'login');
-    $postId = (int) $queryString[1];
-    $post = getPost($config, $db, $postId);
-    if (!$post) {
-        http_response_code(404);
-        echo $mustache->render('404', $data);
-        exit;
+    if ($method === 'GET') {
+        $data['content'] = $post['content'];
+        render(200, 'postedit', $mustache, $data);
     }
     $data['content'] = $_POST['content'];
     $data['errors'] = [];
@@ -1105,7 +1062,7 @@ if ($method === 'GET' && preg_match('/^(p[0-9]{1,3})?$/', $uri, $queryString)) {
         redirect($baseurl . 'thread/' . $post['thread_id']);
     } else {
         $data['has_error'] = TRUE;
-        echo $mustache->render('postedit', $data);
+        render(400, 'postedit', $mustache, $data);
     }
 } else if ($method === 'GET' && preg_match('/^post\/delete\/([0-9]{1,100})$/', $uri, $queryString)) {
     if (!$data['is_logged_in'])
@@ -1118,20 +1075,19 @@ if ($method === 'GET' && preg_match('/^(p[0-9]{1,3})?$/', $uri, $queryString)) {
 } else if ($method === 'GET' && $uri == 'upload') {
     if (!$data['is_logged_in'])
         return redirect($baseurl . 'login');
-    echo $mustache->render('upload', $data);
+    render(200, 'upload', $mustache, $data);
 } else if ($method === 'POST' && $uri == 'upload') {
     if (!$data['is_logged_in'])
         return redirect($baseurl . 'login');
     checkCsrf($mustache, $data);
     checkRateLimit($mustache, $data, 'upload', 10, 300);
     $data['filename'] = handleUpload($db);
-    if (isset($_POST['useJS'])) {
-        header('Content-Type: application/json');
-        echo json_encode(['success' => true, 'url' => $baseurl . 'files/' . $data['filename'], 'csrf' => $data['csrf']]);
-        exit;
-    } else {
-        echo $mustache->render('upload', $data);
-    }
+    if (!isset($_POST['useJS']))
+        render(200, 'upload', $mustache, $data);
+    http_response_code(201);
+    header('Content-Type: application/json');
+    echo json_encode(['success' => true, 'url' => $baseurl . 'files/' . $data['filename'], 'csrf' => $data['csrf']]);
+    exit;
 } else if ($method === 'POST' && $uri === 'vote') {
     if (!$data['is_logged_in'])
         return redirect($baseurl . 'login');
@@ -1181,13 +1137,11 @@ if ($method === 'GET' && preg_match('/^(p[0-9]{1,3})?$/', $uri, $queryString)) {
     $query->bindValue(':id', $_SESSION['user_id'], PDO::PARAM_INT);
     $query->execute();
     $data['is_on'] = (bool) $query->fetchColumn();
-    echo $mustache->render('notifications', $data);
+    render(200, 'notifications', $mustache, $data);
 } else if ($method === 'GET' && str_starts_with($uri, 'search')) {
     $q = trim($_GET['q'] ?? '');
     $encoded = urlencode("site:community.osarch.org $q");
     redirect("https://duckduckgo.com/?q=$encoded");
 } else {
-    http_response_code(404);
-    echo $mustache->render('404', $data);
-    exit;
+    render(404, '404', $mustache, $data);
 }
