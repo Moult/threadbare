@@ -244,6 +244,9 @@ article code {
     color: #777;
     border: 1px solid #ddd;
 }
+article pre > code {
+    display: block;
+}
 article blockquote {
     font-size: 12px;
     border-radius: 5px;
@@ -326,7 +329,7 @@ article .usertag {
   z-index: 1000;
   max-height: 150px;
   overflow-y: auto;
-  font-size: 14px;
+  font-size: 15px;
   box-shadow: 0 2px 8px rgba(0,0,0,0.15);
 }
 .mention-dropdown div {
@@ -342,11 +345,13 @@ article .usertag {
         font-size: 12px;
     }
     nav ul li {
-        display: block;
+        display: inline-block;
+        float: none;
         margin-right: 10px;
     }
     nav .button {
         margin-right: 10px;
+        top: -10px;
     }
     nav form {
         float: none;
