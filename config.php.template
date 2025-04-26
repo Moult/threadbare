@@ -3,4 +3,5 @@ return [
     'sendGridKey' => '',
     'hCaptchaSiteKey' => '',
     'hCaptchaSecretKey' => '',
+    'adminUsernames' => [],
 ];

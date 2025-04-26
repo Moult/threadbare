@@ -552,7 +552,7 @@ function timeAgo(int $timestamp): string
     return floor($diff / 29030400) . ' year' . ($diff < 58060800 ? '' : 's') . ' ago';
 }
 
-function getThread($mustache, $db, $threadId, $page, $perPage, &$data)
+function getThread($config, $mustache, $db, $threadId, $page, $perPage, &$data)
 {
     $query = $db->prepare('
         SELECT t.id, t.title, t.user_id, u.username, t.ts_created, t.ts_updated
@@ -601,7 +601,7 @@ function getThread($mustache, $db, $threadId, $page, $perPage, &$data)
         $row['avatar'] = avatar($row['username']);
         $row['initial'] = strtoupper($row['username'][0]);
         $row['content'] = $content;
-        $row['can_edit'] = isset($_SESSION['user_id']) ? $row['user_id'] === $_SESSION['user_id'] : FALSE;
+        $row['can_edit'] = isset($_SESSION['user_id']) ? $row['user_id'] === $_SESSION['user_id'] || in_array($_SESSION['username'], $config['adminUsernames']) : FALSE;
         $data['posts'][] = $row;
     }
 }
@@ -620,29 +620,36 @@ function postProcessMentions($html)
     }, $html);
 }
 
-function getPost($db, $id)
+function getPost($config, $db, $id)
 {
-    $query = $db->prepare('SELECT user_id, content, thread_id FROM posts WHERE id = :id AND user_id = :user_id');
+    if (in_array($_SESSION['username'], $config['adminUsernames'])) {
+        $query = $db->prepare('SELECT content, thread_id FROM posts WHERE id = :id LIMIT 1');
+    } else {
+        $query = $db->prepare('SELECT content, thread_id FROM posts WHERE id = :id AND user_id = :user_id LIMIT 1');
+        $query->bindValue(':user_id', $_SESSION['user_id']);
+    }
     $query->bindValue(':id', $id);
-    $query->bindValue(':user_id', $_SESSION['user_id']);
     $query->execute();
     return $query->fetch();
 }
 
-function deletePost($db, $id)
+function deletePost($config, $db, $id)
 {
-    $query = $db->prepare('SELECT thread_id FROM posts WHERE id = :id AND user_id = :user_id LIMIT 1');
+    if (in_array($_SESSION['username'], $config['adminUsernames'])) {
+        $query = $db->prepare('SELECT thread_id FROM posts WHERE id = :id LIMIT 1');
+    } else {
+        $query = $db->prepare('SELECT thread_id FROM posts WHERE id = :id AND user_id = :user_id LIMIT 1');
+        $query->bindValue(':user_id', $_SESSION['user_id']);
+    }
     $query->bindValue(':id', $id);
-    $query->bindValue(':user_id', $_SESSION['user_id']);
     $query->execute();
     $threadId = $query->fetchColumn(0);
 
     if (!$threadId)
         return;
 
-    $query = $db->prepare('DELETE FROM posts WHERE id = :id AND user_id = :user_id LIMIT 1');
+    $query = $db->prepare('DELETE FROM posts WHERE id = :id LIMIT 1');
     $query->bindValue(':id', $id);
-    $query->bindValue(':user_id', $_SESSION['user_id']);
     $query->execute();
     $query->fetch();
 
@@ -990,7 +997,7 @@ if ($method === 'GET' && preg_match('/^(p[0-9]{1,3})?$/', $uri, $queryString)) {
     $threadId = (int) $queryString[1];
     $cacheKey = 'thread/' . $threadId . '/p' . $page;
     tryRenderFromCache($cacheKey);
-    getThread($mustache, $db, $threadId, $page, $perPage, $data);
+    getThread($config, $mustache, $db, $threadId, $page, $perPage, $data);
     $totalPages = ceil(getTotalPosts($db, $threadId) / $perPage);
     $data['page'] = $page;
     $data['has_pagination'] = $totalPages > 1;
@@ -1022,7 +1029,7 @@ if ($method === 'GET' && preg_match('/^(p[0-9]{1,3})?$/', $uri, $queryString)) {
         redirect($baseurl . 'thread/' . $threadId . '/p' . $totalPages . '#' . $postId);
     } else {
         $data['has_error'] = TRUE;
-        getThread($mustache, $db, $threadId, $page, $perPage, $data);
+        getThread($config, $mustache, $db, $threadId, $page, $perPage, $data);
         $data['id'] = $threadId;
         $totalPages = ceil(getTotalPosts($db, $threadId) / $perPage);
         $data['page'] = $page;
@@ -1034,7 +1041,7 @@ if ($method === 'GET' && preg_match('/^(p[0-9]{1,3})?$/', $uri, $queryString)) {
     if (!$data['is_logged_in'])
         return redirect($baseurl . 'login');
     $postId = (int) $queryString[1];
-    $post = getPost($db, $postId);
+    $post = getPost($config, $db, $postId);
     if (!$post) {
         http_response_code(404);
         echo $mustache->render('404', $data);
@@ -1047,7 +1054,7 @@ if ($method === 'GET' && preg_match('/^(p[0-9]{1,3})?$/', $uri, $queryString)) {
     if (!$data['is_logged_in'])
         return redirect($baseurl . 'login');
     $postId = (int) $queryString[1];
-    $post = getPost($db, $postId);
+    $post = getPost($config, $db, $postId);
     if (!$post) {
         http_response_code(404);
         echo $mustache->render('404', $data);
@@ -1059,6 +1066,7 @@ if ($method === 'GET' && preg_match('/^(p[0-9]{1,3})?$/', $uri, $queryString)) {
     if (count($data['errors']) === 0) {
         checkRateLimit($mustache, $data, 'postedit', 5, 300);
         updatePost($db, $postId);
+        invalidateCache(['thread/' . $post['thread_id'] . '/p']);
         redirect($baseurl . 'thread/' . $post['thread_id']);
     } else {
         $data['has_error'] = TRUE;
@@ -1069,7 +1077,7 @@ if ($method === 'GET' && preg_match('/^(p[0-9]{1,3})?$/', $uri, $queryString)) {
         return redirect($baseurl . 'login');
     $postId = (int) $queryString[1];
     $threadId = getThreadId($db, $postId);
-    deletePost($db, $postId);
+    deletePost($config, $db, $postId);
     invalidateCache(['index', 'thread/' . $threadId . '/p']);
     redirect($baseurl . 'thread/' . $threadId . '/latest');
 } else if ($method === 'GET' && $uri == 'upload') {
