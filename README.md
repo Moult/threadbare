@@ -80,7 +80,7 @@ server {
         include fastcgi.conf;
     }
 
-    location ~ ^/files/([a-zA-Z0-9._-]+\.(jpg|jpeg|png|gif|pdf|txt|zip|ifc|webm|ogg|mp4))$ {
+    location ~ ^/files/([a-zA-Z0-9/_-]+\.(jpg|jpeg|png|gif|pdf|txt|zip|ifc|webm|ogg|mp4))$ {
         alias /path/to/threadbare/uploads/$1;
         add_header Cache-Control "public, max-age=604800";
     }

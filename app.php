@@ -720,16 +720,17 @@ function handleUpload($db)
     }
 
     $filename = bin2hex(random_bytes(16)) . '.' . $ext;
-
-    $uploadDir = realpath(__DIR__ . '/uploads/');
-    $destination = $uploadDir . DIRECTORY_SEPARATOR . $filename;
-    if (!move_uploaded_file($file['tmp_name'], $destination)) {
+    $subdir = substr($filename, 0, 2) . '/' . substr($filename, 2, 2);
+    $uploadDir = realpath(__DIR__ . '/uploads') . '/' . $subdir;
+    if (!is_dir($uploadDir)) {
+        mkdir($uploadDir, 0755, TRUE);
+    }
+    if (!move_uploaded_file($file['tmp_name'], $uploadDir . DIRECTORY_SEPARATOR . $filename)) {
         http_response_code(500);
         echo $mustache->render('500', $data);
         exit;
     }
-
-    return $filename;
+    return $subdir . '/' . $filename;
 }
 
 function recordThreadView($db, $threadId)
