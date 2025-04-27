@@ -879,11 +879,28 @@ class ForumMarkdown extends Parsedown
 {
     protected function inlineImage($excerpt)
     {
-        $element = parent::inlineImage($excerpt);
-        if (isset($element)) {
-            $element['element']['attributes']['loading'] = 'lazy';
-            return $element;
-        }
+        if ( ! isset($Excerpt['text'][1]) or $Excerpt['text'][1] !== '[')
+            return;
+        $Excerpt['text']= substr($Excerpt['text'], 1);
+        $Link = $this->inlineLink($Excerpt);
+        if ($Link === null)
+            return;
+        if ($Link['element']['name'] === 'video')
+            return $Link;
+        $Inline = array(
+            'extent' => $Link['extent'] + 1,
+            'element' => array(
+                'name' => 'img',
+                'attributes' => array(
+                    'src' => $Link['element']['attributes']['href'],
+                    'alt' => $Link['element']['text'],
+                ),
+            ),
+        );
+        $Inline['element']['attributes'] += $Link['element']['attributes'];
+        $Inline['element']['attributes']['loading'] = 'lazy';
+        unset($Inline['element']['attributes']['href']);
+        return $Inline;
     }
 
     protected function inlineLink($excerpt)
