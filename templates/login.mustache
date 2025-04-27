@@ -6,7 +6,7 @@
 {{/has_login_error}}
 <form action="{{baseurl}}login" method="post">
     <input type="hidden" name="csrf" value="{{csrf}}" />
-    <label for="username">Username</label>
+    <label for="username">Username or email</label>
     <input type="text" name="username" value="{{username}}" />
     <label for="password">Password (<a href="{{baseurl}}reset">Forgot?</a>)</label>
     <input type="password" name="password" />

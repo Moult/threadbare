@@ -97,23 +97,24 @@ function checkCaptcha($mustache, $config)
 function validateLogin($db)
 {
     if (isset($_POST['username']) && isset($_POST['password']) && strlen($_POST['username']) <= 50) {
-        $query = $db->prepare('SELECT id, password FROM users WHERE username = :username AND is_verified = 1');
+        $query = $db->prepare('SELECT id, username, password FROM users WHERE (username = :username OR email = :email) AND is_verified = 1');
         $query->bindParam(':username', $_POST['username']);
+        $query->bindParam(':email', $_POST['username']);
         $query->execute();
         $row = $query->fetch();
         if (!$row)
             return FALSE;
         if (password_verify($_POST['password'], $row['password']))
-            return $row['id'];
+            return $row;
     }
     return FALSE;
 }
 
-function login($userId)
+function login($user)
 {
     session_regenerate_id();
-    $_SESSION['user_id'] = $userId;
-    $_SESSION['username'] = $_POST['username'];
+    $_SESSION['user_id'] = $user['id'];
+    $_SESSION['username'] = $user['username'];
 }
 
 function validatePassword()
@@ -930,10 +931,10 @@ if ($method === 'GET' && preg_match('/^(p[0-9]{1,3})?$/', $uri, $queryString)) {
     render(200, 'login', $mustache, $data);
 } else if ($method === 'POST' && $uri === 'login') {
     checkCsrf($mustache, $data);
-    checkRateLimit($config, $mustache, $data, 'login', 3, 300);
-    $userId = validateLogin($db);
-    if ($userId !== FALSE) {
-        login($userId);
+    checkRateLimit($config, $mustache, $data, 'login', 5, 300);
+    $user = validateLogin($db);
+    if ($user !== FALSE) {
+        login($user);
         redirect($baseurl);
     }
     $data['has_login_error'] = TRUE;
