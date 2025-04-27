@@ -1,0 +1,21 @@
+{{>header}}
+<h2>Edit thread</h2>
+{{#has_error}}
+<p><strong>Uh oh</strong>. Your thread title has issues:</p>
+<ul class="errors">
+{{#errors}}
+    <li>{{.}}</li>
+{{/errors}}
+</ul>
+{{/has_error}}
+<form action="{{baseurl}}thread/edit/{{id}}" method="post">
+    <input type="hidden" name="csrf" value="{{csrf}}" />
+    <label for="title">Title</label>
+    <input type="text" name="title" value="{{title}}" placeholder="Summarise your topic or question" />
+    <input type="submit" value="Edit" />
+</form>
+<form action="{{baseurl}}thread/delete/{{id}}" method="post">
+    <input type="hidden" name="csrf" value="{{csrf}}" />
+    <input type="submit" value="Delete" />
+</form>
+{{>footer}}

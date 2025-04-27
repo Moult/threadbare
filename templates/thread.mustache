@@ -1,5 +1,8 @@
 {{>header}}
 <h2>{{title}}</h2>
+{{#can_edit}}
+<p><a href="{{baseurl}}thread/edit/{{id}}">edit thread</a></p>
+{{/can_edit}}
 {{#posts}}
 <ol class="posts">
     <li class="post">

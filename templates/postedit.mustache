@@ -1,6 +1,5 @@
 {{>header}}
 <h2>Edit post</h2>
-<p>Alternatively, <a href="{{baseurl}}post/delete/{{id}}">delete this post</a>.</p>
 <p>Replies can be formatted using <a href="#">Markdown</a>.</p>
 {{#has_error}}
 <p><strong>Uh oh</strong>. Your post has issues:</p>
@@ -14,5 +13,9 @@
     <input type="hidden" name="csrf" value="{{csrf}}" />
     <textarea name="content">{{content}}</textarea>
     <input type="submit" value="Edit" />
+</form>
+<form action="{{baseurl}}post/delete/{{id}}" method="post">
+    <input type="hidden" name="csrf" value="{{csrf}}" />
+    <input type="submit" value="Delete" />
 </form>
 {{>footer}}

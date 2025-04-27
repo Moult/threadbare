@@ -329,6 +329,14 @@ function updatePost($db, $id)
     $query->execute();
 }
 
+function updateThread($db, $id)
+{
+    $query = $db->prepare('UPDATE threads SET title = :title WHERE id = :id');
+    $query->bindValue(':title', $_POST['title']);
+    $query->bindValue(':id', $id);
+    $query->execute();
+}
+
 function verifyUser($db, $code)
 {
     $query = $db->prepare('SELECT user_id FROM verifications WHERE code = :code LIMIT 1');
@@ -652,11 +660,15 @@ function deletePost($config, $db, $id)
     }
 }
 
-function deleteThread($db, $id)
+function deleteThread($config, $db, $id)
 {
-    $query = $db->prepare('DELETE FROM threads WHERE id = :id AND user_id = :user_id');
+    if (in_array($_SESSION['username'], $config['adminUsernames'])) {
+        $query = $db->prepare('DELETE FROM threads WHERE id = :id LIMIT 1');
+    } else {
+        $query = $db->prepare('DELETE FROM threads WHERE id = :id AND user_id = :user_id LIMIT 1');
+        $query->bindValue(':user_id', $_SESSION['user_id']);
+    }
     $query->bindValue(':id', $id);
-    $query->bindValue(':user_id', $_SESSION['user_id']);
     $query->execute();
 }
 
@@ -872,10 +884,7 @@ class ForumMarkdown extends Parsedown
 $queryString = [];
 if ($method === 'GET' && preg_match('/^(p[0-9]{1,3})?$/', $uri, $queryString)) {
     tryRenderFromCache('index');
-    $page = 1;
-    if (count($queryString) === 2) {
-        $page = (int) substr($queryString[1], 1);
-    }
+    $page = (count($queryString) === 2) ? (int) substr($queryString[1], 1) : 1;
     $data['threads'] = getThreads($db, $page, $perPage);
     $totalPages = ceil(getTotalThreads($db) / $perPage);
     $data['has_pagination'] = $totalPages > 1;
@@ -928,7 +937,6 @@ if ($method === 'GET' && preg_match('/^(p[0-9]{1,3})?$/', $uri, $queryString)) {
 } else if ($method === 'GET' && preg_match('/^reset\/([A-Za-z0-9]{1,100})$/', $uri, $queryString)) {
     $data['code'] = $queryString[1];
     $data['is_valid_code'] = (bool) checkVerificationCode($db, $queryString[1]);
-    $data['is_valid_code'] = TRUE;
     render(200, 'reset', $mustache, $data);
 } else if ($method === 'POST' && preg_match('/^reset\/([A-Za-z0-9]{1,100})$/', $uri, $queryString)) {
     checkCsrf($mustache, $data);
@@ -973,7 +981,7 @@ if ($method === 'GET' && preg_match('/^(p[0-9]{1,3})?$/', $uri, $queryString)) {
     render(200, 'post', $mustache, $data);
 } else if ($method === 'POST' && $uri === 'post') {
     if (!$data['is_logged_in'])
-        return redirect($baseurl . 'login');
+        redirect($baseurl . 'login');
     checkCsrf($mustache, $data);
     checkRateLimit($mustache, $data, 'post', 5, 10);
     $data['errors'] = [];
@@ -996,10 +1004,7 @@ if ($method === 'GET' && preg_match('/^(p[0-9]{1,3})?$/', $uri, $queryString)) {
     $totalPages = ceil(getTotalPosts($db, $threadId) / $perPage);
     redirect($baseurl . 'thread/' . $threadId . '/p' . $totalPages);
 } else if ($method === 'GET' && preg_match('/^thread\/([0-9]{1,50})(\/(p[0-9]{1,3})?)?$/', $uri, $queryString)) {
-    $page = 1;
-    if (count($queryString) === 4) {
-        $page = (int) substr($queryString[3], 1);
-    }
+    $page = (count($queryString) === 4) ? (int) substr($queryString[3], 1) : 1;
     $threadId = (int) $queryString[1];
     $cacheKey = 'thread/' . $threadId . '/p' . $page;
     tryRenderFromCache($cacheKey);
@@ -1016,12 +1021,9 @@ if ($method === 'GET' && preg_match('/^(p[0-9]{1,3})?$/', $uri, $queryString)) {
     render(200, 'thread', $mustache, $data, $cacheKey);
 } else if ($method === 'POST' && preg_match('/^thread\/([0-9]{1,50})(\/(p[0-9]{1,3})?)?$/', $uri, $queryString)) {
     if (!$data['is_logged_in'])
-        return redirect($baseurl . 'login');
+        redirect($baseurl . 'login');
     checkCsrf($mustache, $data);
-    $page = 1;
-    if (count($queryString) === 4) {
-        $page = (int) substr($queryString[3], 1);
-    }
+    $page = (count($queryString) === 4) ? (int) substr($queryString[3], 1) : 1;
     $threadId = (int) $queryString[1];
     $data['errors'] = [];
     validatePost($config, $baseurl, $data['errors']);
@@ -1040,9 +1042,29 @@ if ($method === 'GET' && preg_match('/^(p[0-9]{1,3})?$/', $uri, $queryString)) {
     $data['has_pagination'] = $totalPages > 1;
     $data['pages'] = getPaginationPages($page, $totalPages);
     render(400, 'thread', $mustache, $data, $cacheKey);
+} else if (in_array($method, ['GET', 'POST']) && preg_match('/^thread\/edit\/([0-9]{1,100})$/', $uri, $queryString)) {
+    if (!$data['is_logged_in'])
+        redirect($baseurl . 'login');
+    $threadId = (int) $queryString[1];
+    $thread = getThread($config, $mustache, $db, $threadId, 1, 1, $data);
+    $data['id'] = $threadId;
+    if ($method === 'GET') {
+        render(200, 'threadedit', $mustache, $data);
+    }
+    $data['title'] = $_POST['title'];
+    $data['errors'] = [];
+    validateThread($data['errors']);
+    if (count($data['errors']) === 0) {
+        checkRateLimit($mustache, $data, 'threadedit', 5, 300);
+        updateThread($db, $threadId);
+        invalidateCache(['index', 'thread/' . $threadId . '/p']);
+        redirect($baseurl . 'thread/' . $threadId);
+    }
+    $data['has_error'] = TRUE;
+    render(400, 'threadedit', $mustache, $data);
 } else if (in_array($method, ['GET', 'POST']) && preg_match('/^post\/edit\/([0-9]{1,100})$/', $uri, $queryString)) {
     if (!$data['is_logged_in'])
-        return redirect($baseurl . 'login');
+        redirect($baseurl . 'login');
     $postId = (int) $queryString[1];
     $post = getPost($config, $db, $postId);
     if (!$post)
@@ -1060,13 +1082,23 @@ if ($method === 'GET' && preg_match('/^(p[0-9]{1,3})?$/', $uri, $queryString)) {
         updatePost($db, $postId);
         invalidateCache(['thread/' . $post['thread_id'] . '/p']);
         redirect($baseurl . 'thread/' . $post['thread_id']);
-    } else {
-        $data['has_error'] = TRUE;
-        render(400, 'postedit', $mustache, $data);
     }
-} else if ($method === 'GET' && preg_match('/^post\/delete\/([0-9]{1,100})$/', $uri, $queryString)) {
+    $data['has_error'] = TRUE;
+    render(400, 'postedit', $mustache, $data);
+} else if ($method === 'POST' && preg_match('/^thread\/delete\/([0-9]{1,100})$/', $uri, $queryString)) {
     if (!$data['is_logged_in'])
-        return redirect($baseurl . 'login');
+        redirect($baseurl . 'login');
+    checkCsrf($mustache, $data);
+    checkRateLimit($mustache, $data, 'threaddelete', 5, 300);
+    $threadId = (int) $queryString[1];
+    deleteThread($config, $db, $threadId);
+    invalidateCache(['index', 'thread/' . $threadId . '/p']);
+    redirect($baseurl);
+} else if ($method === 'POST' && preg_match('/^post\/delete\/([0-9]{1,100})$/', $uri, $queryString)) {
+    if (!$data['is_logged_in'])
+        redirect($baseurl . 'login');
+    checkCsrf($mustache, $data);
+    checkRateLimit($mustache, $data, 'postdelete', 5, 300);
     $postId = (int) $queryString[1];
     $threadId = getThreadId($db, $postId);
     deletePost($config, $db, $postId);
@@ -1074,11 +1106,11 @@ if ($method === 'GET' && preg_match('/^(p[0-9]{1,3})?$/', $uri, $queryString)) {
     redirect($baseurl . 'thread/' . $threadId . '/latest');
 } else if ($method === 'GET' && $uri == 'upload') {
     if (!$data['is_logged_in'])
-        return redirect($baseurl . 'login');
+        redirect($baseurl . 'login');
     render(200, 'upload', $mustache, $data);
 } else if ($method === 'POST' && $uri == 'upload') {
     if (!$data['is_logged_in'])
-        return redirect($baseurl . 'login');
+        redirect($baseurl . 'login');
     checkCsrf($mustache, $data);
     checkRateLimit($mustache, $data, 'upload', 10, 300);
     $data['filename'] = handleUpload($db);
@@ -1090,16 +1122,14 @@ if ($method === 'GET' && preg_match('/^(p[0-9]{1,3})?$/', $uri, $queryString)) {
     exit;
 } else if ($method === 'POST' && $uri === 'vote') {
     if (!$data['is_logged_in'])
-        return redirect($baseurl . 'login');
+        redirect($baseurl . 'login');
     checkCsrf($mustache, $data);
     $postId = isset($_POST['post_id']) ? (int) $_POST['post_id'] : 0;
     $vote = isset($_POST['vote']) ? (int) $_POST['vote'] : 0;
     $page = isset($_POST['page']) ? (int) $_POST['page'] : 1;
-
     if ($postId > 0 && in_array($vote, [-1, 1])) {
         addVote($db, $postId, $vote);
     }
-
     $threadId = getThreadId($db, $postId);
     redirect($baseurl . 'thread/' . $threadId . '/p' . $page . '#' . $postId);
 } else if ($method === 'GET' && preg_match('/^mention(\/[0-9]{1,50})?\/@([A-Za-z0-9_-]{1,100})$/', $uri, $queryString)) {
@@ -1129,7 +1159,7 @@ if ($method === 'GET' && preg_match('/^(p[0-9]{1,3})?$/', $uri, $queryString)) {
     echo json_encode(array_merge($results, $stmt->fetchAll(PDO::FETCH_COLUMN, 0)));
 } else if ($method === 'GET' && $uri === 'notifications') {
     if (!$data['is_logged_in'])
-        return redirect($baseurl . 'login');
+        redirect($baseurl . 'login');
     $query = $db->prepare('UPDATE users SET notifications = NOT notifications WHERE id = :id LIMIT 1');
     $query->bindValue(':id', $_SESSION['user_id'], PDO::PARAM_INT);
     $query->execute();
