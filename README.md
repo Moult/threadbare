@@ -36,7 +36,7 @@ Features:
  - User mentions with tab autocomplete and email notifications.
  - Login, sign up, reset password, validation emails.
  - Captcha and Akismet.
- - Admins can edit / delete others and bypass rate limits. Trusted users bypass spam filters.
+ - Admins can edit / delete all posts and bypass rate limits. Admins can also move posts to other threads or split into a new thread. Trusted users bypass spam filters.
  - Aggressive caching for guests (using APCu cache).
  - Pagination.
  - Last read stats, views, last reply.
@@ -55,10 +55,7 @@ Set up dependencies, database, and website URL:
 $ composer install
 $ sqlite3 threadbare.db < db.sql
 $ cp config.php.template config.php
-$ vim config.php # Add your API keys
-$ vim app.php # Edit http://localhost
-$ vim www/style.css # Edit http://localhost
-$ vim www/post.js # Edit http://localhost
+$ vim config.php # Add your API keys and set website URL
 ```
 
 Nginx:

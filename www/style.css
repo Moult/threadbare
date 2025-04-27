@@ -39,7 +39,7 @@ footer {
     color: #aaa;
 }
 header h1 {
-    background-image: url('http://localhost/logo.png');
+    background-image: url('/logo.png');
     background-size: 32px;
     background-repeat: no-repeat;
     height: 32px;

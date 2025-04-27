@@ -49,7 +49,7 @@ document.addEventListener("DOMContentLoaded", () => {
         formData.append("csrf", document.querySelector("input[name=csrf]").value);
         formData.append("useJS", "true");
 
-        fetch("http://localhost/upload", {
+        fetch(window.location.origin + "/upload", {
           method: "POST",
           body: formData
         })

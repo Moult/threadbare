@@ -22,7 +22,7 @@ header('Permissions-Policy: camera=(), microphone=(), geolocation=()');
 $config = require_once (__DIR__ . '/config.php');
 require_once (__DIR__ . '/vendor/autoload.php');
 
-$baseurl = 'http://localhost/';
+$baseurl = $config['baseurl'];
 $perPage = 25;
 $db = new \PDO('sqlite:' . __DIR__ . '/threadbare.db');
 $db->exec('PRAGMA foreign_keys = ON;');
@@ -831,7 +831,7 @@ function isSpam($config, $baseurl, $content)
 
 function tryRenderFromCache($key): void
 {
-    if ($_SESSION['user_id'])
+    if (!empty($_SESSION['user_id']))
         return;
     $html = apcu_fetch('html_' . $key . '_' . sha1($_SERVER['REQUEST_URI']));
     if ($html !== false) {
@@ -869,7 +869,7 @@ function render($code, $template, $mustache, $data, $cacheKey = NULL)
     http_response_code($code);
     $html = $mustache->render($template, $data);
     echo $html;
-    if ($cacheKey)
+    if ($cacheKey && empty($_SESSION['user_id']))
         saveCache($cacheKey, $html);
     exit;
 }
@@ -1017,6 +1017,7 @@ if ($method === 'GET' && preg_match('/^(p[0-9]{1,3})?$/', $uri, $queryString)) {
     render(200, 'verify', $mustache, $data);
 } else if ($method === 'GET' && $uri === 'logout') {
     unset($_SESSION['username']);
+    unset($_SESSION['user_id']);
     $_SESSION['csrf'] = [];
     session_unset();
     session_destroy();
