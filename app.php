@@ -13,9 +13,7 @@ if (empty($_SESSION['ratelimit'])) {
 $config = require_once (__DIR__ . '/config.php');
 require_once (__DIR__ . '/vendor/autoload.php');
 
-$CSPurls = substr($config['baseurl'], 0, -1) . ' '
-    . explode('://', $config['baseurl'])[0] . '://*.' . substr(explode('://', $config['baseurl'])[1], 0, -1);
-header("Content-Security-Policy: default-src 'self'; script-src 'self' https://hcaptcha.com https://*.hcaptcha.com; frame-src 'self' https://hcaptcha.com https://*.hcaptcha.com; style-src 'self' https://hcaptcha.com https://*.hcaptcha.com; connect-src 'self' https://hcaptcha.com https://*.hcaptcha.com; img-src * data: blob:; media-src 'self' " . $CSPurls . ';');
+header("Content-Security-Policy: default-src 'self'; script-src 'self' https://hcaptcha.com https://*.hcaptcha.com; frame-src 'self' https://hcaptcha.com https://*.hcaptcha.com; style-src 'self' https://hcaptcha.com https://*.hcaptcha.com; connect-src 'self' https://hcaptcha.com https://*.hcaptcha.com; img-src * data: blob:; media-src 'self' " . $config['cspUrls'] . ';');
 header('X-Frame-Options: DENY');
 header('X-Content-Type-Options: nosniff');
 if (!empty($_SERVER['HTTPS']) && $_SERVER['HTTPS'] !== 'off') {

@@ -45,9 +45,10 @@ Features:
 
 Your PHP needs:
 
- - curl
- - SQLite
- - apcu\_cache
+ - curl (for hCaptcha)
+ - gmp (for SendGrid)
+ - SQLite (for database)
+ - apcu\_cache (for cache)
 
 Set up dependencies, database, and website URL:
 
