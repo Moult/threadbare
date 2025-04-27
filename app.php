@@ -45,9 +45,10 @@ function checkCsrf($mustache, &$data)
     $data['csrf'] = $_SESSION['csrf'];
 }
 
-function checkRateLimit($mustache, $data, $key = 'login', $limit = 3, $window = 300)
+function checkRateLimit($config, $mustache, $data, $key = 'login', $limit = 3, $window = 300)
 {
-    return;
+    if (in_array($_SESSION['username'], $config['adminUsernames']))
+        return;
     $now = time();
     if (!isset($_SESSION['ratelimit'][$key])) {
         $_SESSION['ratelimit'][$key] = ['attempts' => 0, 'time' => $now];
@@ -894,7 +895,7 @@ if ($method === 'GET' && preg_match('/^(p[0-9]{1,3})?$/', $uri, $queryString)) {
     render(200, 'login', $mustache, $data);
 } else if ($method === 'POST' && $uri === 'login') {
     checkCsrf($mustache, $data);
-    checkRateLimit($mustache, $data, 'login', 3, 300);
+    checkRateLimit($config, $mustache, $data, 'login', 3, 300);
     $userId = validateLogin($db);
     if ($userId !== FALSE) {
         login($userId);
@@ -905,7 +906,7 @@ if ($method === 'GET' && preg_match('/^(p[0-9]{1,3})?$/', $uri, $queryString)) {
     render(400, 'login', $mustache, $data);
 } else if ($method === 'POST' && $uri === 'register') {
     checkCsrf($mustache, $data);
-    checkRateLimit($mustache, $data, 'register', 5, 300);
+    checkRateLimit($config, $mustache, $data, 'register', 5, 300);
     checkCaptcha($mustache, $config);
     $data['errors'] = validateRegistration($db);
     if (count($data['errors']) === 0) {
@@ -925,7 +926,7 @@ if ($method === 'GET' && preg_match('/^(p[0-9]{1,3})?$/', $uri, $queryString)) {
     render(200, 'reset', $mustache, $data);
 } else if ($method === 'POST' && $uri == 'reset') {
     checkCsrf($mustache, $data);
-    checkRateLimit($mustache, $data, 'verify', 3, 300);
+    checkRateLimit($config, $mustache, $data, 'verify', 3, 300);
     $user = getUserByEmail($db, empty($_POST['email']) ? '' : $_POST['email']);
     if ($user) {
         $code = generateVerification($db, $user['id']);
@@ -940,7 +941,7 @@ if ($method === 'GET' && preg_match('/^(p[0-9]{1,3})?$/', $uri, $queryString)) {
     render(200, 'reset', $mustache, $data);
 } else if ($method === 'POST' && preg_match('/^reset\/([A-Za-z0-9]{1,100})$/', $uri, $queryString)) {
     checkCsrf($mustache, $data);
-    checkRateLimit($mustache, $data, 'reset', 3, 300);
+    checkRateLimit($config, $mustache, $data, 'reset', 3, 300);
     $data['code'] = $queryString[1];
     $userId = checkVerificationCode($db, $queryString[1]);
     $data['is_valid_code'] = (bool) $userId;
@@ -956,7 +957,7 @@ if ($method === 'GET' && preg_match('/^(p[0-9]{1,3})?$/', $uri, $queryString)) {
     render(200, 'verify', $mustache, $data);
 } else if ($method === 'POST' && $uri == 'verify') {
     checkCsrf($mustache, $data);
-    checkRateLimit($mustache, $data, 'verify', 3, 300);
+    checkRateLimit($config, $mustache, $data, 'verify', 3, 300);
     checkCaptcha($mustache, $config);
     $user = getUserByEmail($db, empty($_POST['email']) ? '' : $_POST['email']);
     if ($user) {
@@ -983,12 +984,12 @@ if ($method === 'GET' && preg_match('/^(p[0-9]{1,3})?$/', $uri, $queryString)) {
     if (!$data['is_logged_in'])
         redirect($baseurl . 'login');
     checkCsrf($mustache, $data);
-    checkRateLimit($mustache, $data, 'post', 5, 10);
+    checkRateLimit($config, $mustache, $data, 'post', 5, 10);
     $data['errors'] = [];
     validateThread($data['errors']);
     validatePost($config, $baseurl, $data['errors']);
     if (count($data['errors']) === 0) {
-        checkRateLimit($mustache, $data, 'post-success', 5, 300);
+        checkRateLimit($config, $mustache, $data, 'post-success', 5, 300);
         $threadId = addThread($db);
         addPost($db, $threadId);
         sendNotificationEmails($db, $threadId, $baseurl, $config['sendGridKey']);
@@ -1055,7 +1056,7 @@ if ($method === 'GET' && preg_match('/^(p[0-9]{1,3})?$/', $uri, $queryString)) {
     $data['errors'] = [];
     validateThread($data['errors']);
     if (count($data['errors']) === 0) {
-        checkRateLimit($mustache, $data, 'threadedit', 5, 300);
+        checkRateLimit($config, $mustache, $data, 'threadedit', 5, 300);
         updateThread($db, $threadId);
         invalidateCache(['index', 'thread/' . $threadId . '/p']);
         redirect($baseurl . 'thread/' . $threadId);
@@ -1078,7 +1079,7 @@ if ($method === 'GET' && preg_match('/^(p[0-9]{1,3})?$/', $uri, $queryString)) {
     $data['errors'] = [];
     validatePost($config, $baseurl, $data['errors']);
     if (count($data['errors']) === 0) {
-        checkRateLimit($mustache, $data, 'postedit', 5, 300);
+        checkRateLimit($config, $mustache, $data, 'postedit', 5, 300);
         updatePost($db, $postId);
         invalidateCache(['thread/' . $post['thread_id'] . '/p']);
         redirect($baseurl . 'thread/' . $post['thread_id']);
@@ -1089,7 +1090,7 @@ if ($method === 'GET' && preg_match('/^(p[0-9]{1,3})?$/', $uri, $queryString)) {
     if (!$data['is_logged_in'])
         redirect($baseurl . 'login');
     checkCsrf($mustache, $data);
-    checkRateLimit($mustache, $data, 'threaddelete', 5, 300);
+    checkRateLimit($config, $mustache, $data, 'threaddelete', 5, 300);
     $threadId = (int) $queryString[1];
     deleteThread($config, $db, $threadId);
     invalidateCache(['index', 'thread/' . $threadId . '/p']);
@@ -1098,7 +1099,7 @@ if ($method === 'GET' && preg_match('/^(p[0-9]{1,3})?$/', $uri, $queryString)) {
     if (!$data['is_logged_in'])
         redirect($baseurl . 'login');
     checkCsrf($mustache, $data);
-    checkRateLimit($mustache, $data, 'postdelete', 5, 300);
+    checkRateLimit($config, $mustache, $data, 'postdelete', 5, 300);
     $postId = (int) $queryString[1];
     $threadId = getThreadId($db, $postId);
     deletePost($config, $db, $postId);
@@ -1112,7 +1113,7 @@ if ($method === 'GET' && preg_match('/^(p[0-9]{1,3})?$/', $uri, $queryString)) {
     if (!$data['is_logged_in'])
         redirect($baseurl . 'login');
     checkCsrf($mustache, $data);
-    checkRateLimit($mustache, $data, 'upload', 10, 300);
+    checkRateLimit($config, $mustache, $data, 'upload', 10, 300);
     $data['filename'] = handleUpload($db);
     if (!isset($_POST['useJS']))
         render(200, 'upload', $mustache, $data);

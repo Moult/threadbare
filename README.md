@@ -36,7 +36,7 @@ Features:
  - User mentions with tab autocomplete and email notifications.
  - Login, sign up, reset password, validation emails.
  - Captcha and Akismet.
- - Admins can edit / delete others. Trusted users bypass spam filters.
+ - Admins can edit / delete others and bypass rate limits. Trusted users bypass spam filters.
  - Aggressive caching for guests (using APCu cache).
  - Pagination.
  - Last read stats, views, last reply.
