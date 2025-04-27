@@ -10,7 +10,12 @@ if (empty($_SESSION['ratelimit'])) {
     $_SESSION['ratelimit'] = ['attempts' => 0, 'time' => time()];
 }
 
-header("Content-Security-Policy: default-src 'self'; script-src 'self' https://hcaptcha.com https://*.hcaptcha.com; frame-src 'self' https://hcaptcha.com https://*.hcaptcha.com; style-src 'self' https://hcaptcha.com https://*.hcaptcha.com; connect-src 'self' https://hcaptcha.com https://*.hcaptcha.com; img-src * data: blob:; media-src 'self' https://*.osarch.org;");
+$config = require_once (__DIR__ . '/config.php');
+require_once (__DIR__ . '/vendor/autoload.php');
+
+$CSPurls = substr($config['baseurl'], 0, -1) . ' '
+    . explode('://', $config['baseurl'])[0] . '://*.' . substr(explode('://', $config['baseurl'])[1], 0, -1);
+header("Content-Security-Policy: default-src 'self'; script-src 'self' https://hcaptcha.com https://*.hcaptcha.com; frame-src 'self' https://hcaptcha.com https://*.hcaptcha.com; style-src 'self' https://hcaptcha.com https://*.hcaptcha.com; connect-src 'self' https://hcaptcha.com https://*.hcaptcha.com; img-src * data: blob:; media-src 'self' " . $CSPurls . ';');
 header('X-Frame-Options: DENY');
 header('X-Content-Type-Options: nosniff');
 if (!empty($_SERVER['HTTPS']) && $_SERVER['HTTPS'] !== 'off') {
@@ -19,9 +24,6 @@ if (!empty($_SERVER['HTTPS']) && $_SERVER['HTTPS'] !== 'off') {
 header('Referrer-Policy: no-referrer-when-downgrade');
 header('Permissions-Policy: camera=(), microphone=(), geolocation=()');
 
-$config = require_once (__DIR__ . '/config.php');
-require_once (__DIR__ . '/vendor/autoload.php');
-
 $baseurl = $config['baseurl'];
 $perPage = 25;
 $db = new \PDO('sqlite:' . __DIR__ . '/threadbare.db');
@@ -29,7 +31,7 @@ $db->exec('PRAGMA foreign_keys = ON;');
 $method = $_SERVER['REQUEST_METHOD'];
 $uri = trim($_SERVER['REQUEST_URI'], '/');
 $mustache = new Mustache_Engine(['loader' => new Mustache_Loader_FilesystemLoader(__DIR__ . '/templates/')]);
-$data = ['baseurl' => $baseurl, 'csrf' => $_SESSION['csrf'], 'captcha' => $config['hCaptchaSiteKey']];
+$data = ['baseurl' => $baseurl, 'csrf' => $_SESSION['csrf'], 'captcha' => $config['hCaptchaSiteKey'], 'html_title' => $config['websiteTitle'], 'h1' => $config['websiteTitle'], 'blurb' => $config['blurb']];
 if (isset($_SESSION['username'])) {
     $data['is_logged_in'] = TRUE;
     $data['username'] = $_SESSION['username'];
@@ -80,7 +82,7 @@ function checkRateLimit($config, $mustache, $data, $key = 'login', $limit = 3, $
 
 function checkCaptcha($mustache, $config)
 {
-    $data = array('secret' => $config['hCaptchaSecretKey'], 'response' => $_POST['h-captcha-response']);
+    $data = ['secret' => $config['hCaptchaSecretKey'], 'response' => $_POST['h-captcha-response']];
     $verify = curl_init();
     curl_setopt($verify, CURLOPT_URL, 'https://hcaptcha.com/siteverify');
     curl_setopt($verify, CURLOPT_POST, true);
@@ -129,7 +131,7 @@ function validatePassword()
     return $errors;
 }
 
-function validateRegistration($db)
+function validateRegistration($config, $db)
 {
     $errors = [];
     $fields = ['username', 'password', 'password2', 'email', 'answer'];
@@ -157,7 +159,7 @@ function validateRegistration($db)
             $errors[] = 'Email is not valid.';
         }
     }
-    if (isset($_POST['answer']) && $_POST['answer'] != 'hcraso') {
+    if (isset($_POST['answer']) && strtolower($_POST['answer']) != strtolower($config['iqAnswer'])) {
         $errors[] = 'The answer is wrong.';
     }
     if (isset($_POST['username']) && isset($_POST['email'])) {
@@ -205,17 +207,17 @@ function generateVerification($db, $userId)
     return $code;
 }
 
-function sendVerificationEmail($email, $baseurl, $code, $apiKey)
+function sendVerificationEmail($config, $email, $code)
 {
     $email = filter_var($email, FILTER_SANITIZE_EMAIL);
-    $url = $baseurl . 'verify/' . $code;
-    $plain = "Welcome to the OSArch Forums!\n\nYou've just registered a new account. If this wasn't you, ignore this email. Click this link to verify your account:\n\n" . $url;
+    $url = $config['baseurl'] . 'verify/' . $code;
+    $plain = "Welcome to the forums!\n\nYou've just registered a new account. If this wasn't you, ignore this email. Click this link to verify your account:\n\n" . $url;
     $message = new \SendGrid\Mail\Mail();
-    $message->setFrom('noreply@osarch.org', 'OSArch');
-    $message->setSubject('Verify your OSArch Account');
+    $message->setFrom($config['emailFrom'], $config['websiteTitle']);
+    $message->setSubject('Verify your ' . $config['websiteTitle'] . ' Account');
     $message->addTo($email);
     $message->addContent('text/plain', $plain);
-    $sendgrid = new \SendGrid($apiKey);
+    $sendgrid = new \SendGrid($config['sendGridKey']);
     try {
         $sendgrid->send($message);
     } catch (Exception $e) {
@@ -223,17 +225,17 @@ function sendVerificationEmail($email, $baseurl, $code, $apiKey)
     }
 }
 
-function sendResetEmail($email, $baseurl, $code, $apiKey)
+function sendResetEmail($config, $email, $code)
 {
     $email = filter_var($email, FILTER_SANITIZE_EMAIL);
-    $url = $baseurl . 'reset/' . $code;
-    $plain = "To reset your password for the OSArch Community, click the link below. If this wasn't you, ignore this email.\n\n" . $url;
+    $url = $config['baseurl'] . 'reset/' . $code;
+    $plain = "To reset your password, click the link below. If this wasn't you, ignore this email.\n\n" . $url;
     $message = new \SendGrid\Mail\Mail();
-    $message->setFrom('noreply@osarch.org', 'OSArch');
-    $message->setSubject('Reset OSArch Password');
+    $message->setFrom($config['emailFrom'], $config['websiteTitle']);
+    $message->setSubject('Reset ' . $config['websiteTitle'] . ' Password');
     $message->addTo($email);
     $message->addContent('text/plain', $plain);
-    $sendgrid = new \SendGrid($apiKey);
+    $sendgrid = new \SendGrid($config['sendGridKey']);
     try {
         $sendgrid->send($message);
     } catch (Exception $e) {
@@ -241,7 +243,7 @@ function sendResetEmail($email, $baseurl, $code, $apiKey)
     }
 }
 
-function sendNotificationEmails($db, $threadId, $baseurl, $apiKey)
+function sendNotificationEmails($config, $db, $threadId)
 {
     $emails = [];
     $query = $db->prepare('SELECT title FROM threads WHERE id = :id LIMIT 1');
@@ -292,9 +294,9 @@ function sendNotificationEmails($db, $threadId, $baseurl, $apiKey)
     $plain = $username . ' has posted on the thread "' . $title . '". Check it out!' . "\n\n" . $url;
     $plain .= "\n\n" . "If you don't want notifications, sign in then visit this page:" . "\n\n" . $url2;
     $message = new \SendGrid\Mail\Mail();
-    $message->setFrom('noreply@osarch.org', 'OSArch');
-    $message->setSubject('[OSArch] ' . $_SESSION['username'] . ' commented on ' . $title);
-    $message->addTo('noreply@osarch.org');
+    $message->setFrom($config['emailFrom'], $config['websiteTitle']);
+    $message->setSubject('[' . $config['websiteTitle'] . '] ' . $_SESSION['username'] . ' commented on ' . $title);
+    $message->addTo($config['emailFrom']);
 
     foreach (array_unique($emails) as $email) {
         $personalization = new \SendGrid\Mail\Personalization();
@@ -303,7 +305,7 @@ function sendNotificationEmails($db, $threadId, $baseurl, $apiKey)
     }
 
     $message->addContent('text/plain', $plain);
-    $sendgrid = new \SendGrid($apiKey);
+    $sendgrid = new \SendGrid($config['sendGridKey']);
     try {
         $sendgrid->send($message);
     } catch (Exception $e) {
@@ -712,14 +714,14 @@ function deleteThread($config, $db, $id)
     $query->execute();
 }
 
-function handleUpload($db)
+function handleUpload($config, $db)
 {
     if (!isset($_FILES['attachment']) || $_FILES['attachment']['error'] !== UPLOAD_ERR_OK)
         render(400, '400', $mustache, $data);
 
     $file = $_FILES['attachment'];
 
-    if ($file['size'] > 5 * 1024 * 1024) {
+    if ($file['size'] > $config['maxUploadMb'] * 1024 * 1024) {
         die('File too large.');
     }
 
@@ -888,36 +890,28 @@ class ForumMarkdown extends Parsedown
     protected function inlineLink($excerpt)
     {
         $element = parent::inlineLink($excerpt);
-        $mime = [
-            'mp4' => 'video/mp4',
-            'webm' => 'video/webm',
-            'ogg' => 'video/ogg'
-        ];
-        if (isset($element)) {
-            foreach ($mime as $ext => $mimetype) {
-                if (str_ends_with($element['element']['attributes']['href'], $ext)) {
-                    return array(
-                        'extent' => $element['extent'] + 1,
-                        'element' => array(
-                            'name' => 'video',
-                            'attributes' => array(
-                                'width' => '100%',
-                                'controls' => true,
-                            ),
-                            'handler' => 'element',
-                            'text' => [
-                                'name' => 'source',
-                                'attributes' => [
-                                    'src' => $element['element']['attributes']['href'],
-                                    'type' => $mimetype
-                                ]
-                            ],
-                        ),
-                    );
-                }
+        if (!isset($element))
+            return;
+        $mime = ['mp4' => 'video/mp4', 'webm' => 'video/webm', 'ogg' => 'video/ogg'];
+        foreach ($mime as $ext => $mimetype) {
+            if (str_ends_with(strtolower($element['element']['attributes']['href']), strtolower($ext))) {
+                return [
+                    'extent' => $element['extent'] + 1,
+                    'element' => [
+                        'name' => 'video',
+                        'attributes' => ['width' => '100%', 'controls' => true],
+                        'handler' => 'element',
+                        'text' => [
+                            'name' => 'source',
+                            'attributes' => [
+                                'src' => $element['element']['attributes']['href'], 'type' => $mimetype
+                            ]
+                        ],
+                    ],
+                ];
             }
-            return $element;
         }
+        return $element;
     }
 }
 
@@ -932,6 +926,7 @@ if ($method === 'GET' && preg_match('/^(p[0-9]{1,3})?$/', $uri, $queryString)) {
     render(200, 'index', $mustache, $data, 'index');
 } else if ($method === 'GET' && $uri === 'login') {
     generateCsrf($data);
+    $data['iq_question'] = $config['iqQuestion'];
     render(200, 'login', $mustache, $data);
 } else if ($method === 'POST' && $uri === 'login') {
     checkCsrf($mustache, $data);
@@ -943,16 +938,17 @@ if ($method === 'GET' && preg_match('/^(p[0-9]{1,3})?$/', $uri, $queryString)) {
     }
     $data['has_login_error'] = TRUE;
     $data['username'] = isset($_POST['username']) ? $_POST['username'] : '';
+    $data['iq_question'] = $config['iqQuestion'];
     render(400, 'login', $mustache, $data);
 } else if ($method === 'POST' && $uri === 'register') {
     checkCsrf($mustache, $data);
     checkRateLimit($config, $mustache, $data, 'register', 5, 300);
     checkCaptcha($mustache, $config);
-    $data['errors'] = validateRegistration($db);
+    $data['errors'] = validateRegistration($config, $db);
     if (count($data['errors']) === 0) {
         $userId = addUser($db);
         $code = generateVerification($db, $userId);
-        if (sendVerificationEmail($_POST['email'], $baseurl, $code, $config['sendGridKey']) === FALSE)
+        if (sendVerificationEmail($config, $_POST['email'], $code) === FALSE)
             render(500, '500', $mustache, $data);
         $data['is_sent'] = TRUE;
         render(200, 'verify', $mustache, $data);
@@ -961,6 +957,7 @@ if ($method === 'GET' && preg_match('/^(p[0-9]{1,3})?$/', $uri, $queryString)) {
     $data['username'] = isset($_POST['username']) ? $_POST['username'] : '';
     $data['email'] = isset($_POST['email']) ? $_POST['email'] : '';
     $data['answer'] = isset($_POST['answer']) ? $_POST['answer'] : '';
+    $data['iq_question'] = $config['iqQuestion'];
     render(400, 'login', $mustache, $data);
 } else if ($method === 'GET' && $uri == 'reset') {
     generateCsrf($data);
@@ -971,7 +968,7 @@ if ($method === 'GET' && preg_match('/^(p[0-9]{1,3})?$/', $uri, $queryString)) {
     $user = getUserByEmail($db, empty($_POST['email']) ? '' : $_POST['email']);
     if ($user) {
         $code = generateVerification($db, $user['id']);
-        if (sendResetEmail($user['email'], $baseurl, $code, $config['sendGridKey']) === FALSE)
+        if (sendResetEmail($config, $user['email'], $code) === FALSE)
             render(500, '500', $mustache, $data);
     }
     $data['is_sent'] = TRUE;
@@ -1005,7 +1002,7 @@ if ($method === 'GET' && preg_match('/^(p[0-9]{1,3})?$/', $uri, $queryString)) {
     $user = getUserByEmail($db, empty($_POST['email']) ? '' : $_POST['email']);
     if ($user) {
         $code = generateVerification($db, $user['id']);
-        if (sendVerificationEmail($user['email'], $baseurl, $code, $config['sendGridKey']) === FALSE)
+        if (sendVerificationEmail($config, $user['email'], $code) === FALSE)
             render(500, '500', $mustache, $data);
     }
     $data['is_sent'] = TRUE;
@@ -1039,7 +1036,7 @@ if ($method === 'GET' && preg_match('/^(p[0-9]{1,3})?$/', $uri, $queryString)) {
         checkRateLimit($config, $mustache, $data, 'post-success', 5, 300);
         $threadId = addThread($db);
         addPost($db, $threadId);
-        sendNotificationEmails($db, $threadId, $baseurl, $config['sendGridKey']);
+        sendNotificationEmails($config, $db, $threadId);
         invalidateCache(['index']);
         redirect($baseurl . 'thread/' . $threadId);
     }
@@ -1066,6 +1063,7 @@ if ($method === 'GET' && preg_match('/^(p[0-9]{1,3})?$/', $uri, $queryString)) {
         markThreadAsRead($db, $threadId);
     }
     $data['id'] = $threadId;
+    $data['html_title'] = $data['title'];
     generateCsrf($data);
     render(200, 'thread', $mustache, $data, $cacheKey);
 } else if ($method === 'POST' && preg_match('/^thread\/([0-9]{1,50})(\/(p[0-9]{1,3})?)?$/', $uri, $queryString)) {
@@ -1078,7 +1076,7 @@ if ($method === 'GET' && preg_match('/^(p[0-9]{1,3})?$/', $uri, $queryString)) {
     validatePost($config, $baseurl, $data['errors']);
     if (count($data['errors']) === 0) {
         $postId = addPost($db, $threadId);
-        sendNotificationEmails($db, $threadId, $baseurl, $config['sendGridKey']);
+        sendNotificationEmails($config, $db, $threadId);
         $totalPages = ceil(getTotalPosts($db, $threadId) / $perPage);
         invalidateCache(['index', 'thread/' . $threadId . '/p' . $totalPages]);
         redirect($baseurl . 'thread/' . $threadId . '/p' . $totalPages . '#' . $postId);
@@ -1090,6 +1088,7 @@ if ($method === 'GET' && preg_match('/^(p[0-9]{1,3})?$/', $uri, $queryString)) {
     $data['page'] = $page;
     $data['has_pagination'] = $totalPages > 1;
     $data['pages'] = getPaginationPages($page, $totalPages);
+    $data['html_title'] = $data['title'];
     render(400, 'thread', $mustache, $data, $cacheKey);
 } else if (in_array($method, ['GET', 'POST']) && preg_match('/^thread\/edit\/([0-9]{1,100})$/', $uri, $queryString)) {
     if (!$data['is_logged_in'])
@@ -1178,7 +1177,7 @@ if ($method === 'GET' && preg_match('/^(p[0-9]{1,3})?$/', $uri, $queryString)) {
         redirect($baseurl . 'login');
     checkCsrf($mustache, $data);
     checkRateLimit($config, $mustache, $data, 'upload', 10, 300);
-    $data['filename'] = handleUpload($db);
+    $data['filename'] = handleUpload($config, $db);
     if (!isset($_POST['useJS']))
         render(200, 'upload', $mustache, $data);
     http_response_code(201);
@@ -1234,9 +1233,7 @@ if ($method === 'GET' && preg_match('/^(p[0-9]{1,3})?$/', $uri, $queryString)) {
     $data['is_on'] = (bool) $query->fetchColumn();
     render(200, 'notifications', $mustache, $data);
 } else if ($method === 'GET' && str_starts_with($uri, 'search')) {
-    $q = trim($_GET['q'] ?? '');
-    $encoded = urlencode("site:community.osarch.org $q");
-    redirect("https://duckduckgo.com/?q=$encoded");
+    redirect('https://duckduckgo.com/?q=' . urlencode('site:' . $baseurl . ' ' . trim($_GET['q'] ?? '')));
 } else {
     render(404, '404', $mustache, $data);
 }

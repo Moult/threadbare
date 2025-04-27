@@ -1,6 +1,12 @@
 <?php
 return [
-    'baseurl' => 'http://localhost/',
+    'baseurl' => 'http://localhost/', // With trailing slash
+    'websiteTitle' => 'Threadbare Demo',
+    'blurb' => 'This is a demo discussion forum for the Threadbare forum software.,
+    'iqQuestion' => 'What is the colour of George Washington\'s favourite black horse?',
+    'iqAnswer' => 'black',
+    'emailFrom' => 'noreply@website.example',
+    'maxUploadMb' => 5,
     'akismetKey' => '',
     'sendGridKey' => '',
     'hCaptchaSiteKey' => '',
