@@ -2,8 +2,8 @@
 
 session_start();
 
-if (empty($_SESSION['csrf'])) {
-    $_SESSION['csrf'] = bin2hex(random_bytes(32));
+if (empty($_SESSION['csrf']) || !is_array($_SESSION['csrf'])) {
+    $_SESSION['csrf'] = [];
 }
 
 if (empty($_SESSION['ratelimit'])) {
@@ -37,12 +37,25 @@ if (isset($_SESSION['username'])) {
     $data['is_logged_in'] = FALSE;
 }
 
+function generateCsrf(&$data)
+{
+    $_SESSION['csrf'][] = $data['csrf'] = bin2hex(random_bytes(32));
+    if (count($_SESSION['csrf']) > 30) {
+        array_shift($_SESSION['csrf']);
+    }
+}
+
 function checkCsrf($mustache, &$data)
 {
-    if (!isset($_POST['csrf']) || !hash_equals($_SESSION['csrf'], $_POST['csrf']))
+    if (!isset($_POST['csrf']))
         render(403, '403', $mustache, $data);
-    $_SESSION['csrf'] = bin2hex(random_bytes(32));
-    $data['csrf'] = $_SESSION['csrf'];
+    foreach ($_SESSION['csrf'] as $csrf) {
+        if (hash_equals($csrf, $_POST['csrf'])) {
+            generateCsrf($data);
+            return;
+        }
+    }
+    render(403, '403', $mustache, $data);
 }
 
 function checkRateLimit($config, $mustache, $data, $key = 'login', $limit = 3, $window = 300)
@@ -918,6 +931,7 @@ if ($method === 'GET' && preg_match('/^(p[0-9]{1,3})?$/', $uri, $queryString)) {
     $data['pages'] = getPaginationPages($page, $totalPages);
     render(200, 'index', $mustache, $data, 'index');
 } else if ($method === 'GET' && $uri === 'login') {
+    generateCsrf($data);
     render(200, 'login', $mustache, $data);
 } else if ($method === 'POST' && $uri === 'login') {
     checkCsrf($mustache, $data);
@@ -949,6 +963,7 @@ if ($method === 'GET' && preg_match('/^(p[0-9]{1,3})?$/', $uri, $queryString)) {
     $data['answer'] = isset($_POST['answer']) ? $_POST['answer'] : '';
     render(400, 'login', $mustache, $data);
 } else if ($method === 'GET' && $uri == 'reset') {
+    generateCsrf($data);
     render(200, 'reset', $mustache, $data);
 } else if ($method === 'POST' && $uri == 'reset') {
     checkCsrf($mustache, $data);
@@ -962,6 +977,7 @@ if ($method === 'GET' && preg_match('/^(p[0-9]{1,3})?$/', $uri, $queryString)) {
     $data['is_sent'] = TRUE;
     render(200, 'reset', $mustache, $data);
 } else if ($method === 'GET' && preg_match('/^reset\/([A-Za-z0-9]{1,100})$/', $uri, $queryString)) {
+    generateCsrf($data);
     $data['code'] = $queryString[1];
     $data['is_valid_code'] = (bool) checkVerificationCode($db, $queryString[1]);
     render(200, 'reset', $mustache, $data);
@@ -980,6 +996,7 @@ if ($method === 'GET' && preg_match('/^(p[0-9]{1,3})?$/', $uri, $queryString)) {
     }
     render(200, 'reset', $mustache, $data);
 } else if ($method === 'GET' && $uri == 'verify') {
+    generateCsrf($data);
     render(200, 'verify', $mustache, $data);
 } else if ($method === 'POST' && $uri == 'verify') {
     checkCsrf($mustache, $data);
@@ -994,17 +1011,20 @@ if ($method === 'GET' && preg_match('/^(p[0-9]{1,3})?$/', $uri, $queryString)) {
     $data['is_sent'] = TRUE;
     render(200, 'verify', $mustache, $data);
 } else if ($method === 'GET' && preg_match('/^verify\/([A-Za-z0-9]{1,100})$/', $uri, $queryString)) {
+    generateCsrf($data);
     $data['code'] = $queryString[1];
     $data['is_success'] = verifyUser($db, $queryString[1]);
     render(200, 'verify', $mustache, $data);
 } else if ($method === 'GET' && $uri === 'logout') {
     unset($_SESSION['username']);
+    $_SESSION['csrf'] = [];
     session_unset();
     session_destroy();
     redirect($baseurl);
 } else if ($method === 'GET' && $uri === 'post') {
     if (!$data['is_logged_in'])
         redirect($baseurl . 'login');
+    generateCsrf($data);
     render(200, 'post', $mustache, $data);
 } else if ($method === 'POST' && $uri === 'post') {
     if (!$data['is_logged_in'])
@@ -1045,6 +1065,7 @@ if ($method === 'GET' && preg_match('/^(p[0-9]{1,3})?$/', $uri, $queryString)) {
         markThreadAsRead($db, $threadId);
     }
     $data['id'] = $threadId;
+    generateCsrf($data);
     render(200, 'thread', $mustache, $data, $cacheKey);
 } else if ($method === 'POST' && preg_match('/^thread\/([0-9]{1,50})(\/(p[0-9]{1,3})?)?$/', $uri, $queryString)) {
     if (!$data['is_logged_in'])
@@ -1076,10 +1097,12 @@ if ($method === 'GET' && preg_match('/^(p[0-9]{1,3})?$/', $uri, $queryString)) {
     $thread = getThread($config, $mustache, $db, $threadId, 1, 1, $data);
     $data['id'] = $threadId;
     if ($method === 'GET') {
+        generateCsrf($data);
         render(200, 'threadedit', $mustache, $data);
     }
     $data['title'] = $_POST['title'];
     $data['errors'] = [];
+    checkCsrf($mustache, $data);
     validateThread($config, $baseurl, $data['errors']);
     if (count($data['errors']) === 0) {
         checkRateLimit($config, $mustache, $data, 'threadedit', 5, 300);
@@ -1099,11 +1122,13 @@ if ($method === 'GET' && preg_match('/^(p[0-9]{1,3})?$/', $uri, $queryString)) {
     $data['id'] = $postId;
     $data['can_move'] = in_array($_SESSION['username'], $config['adminUsernames']);
     if ($method === 'GET') {
+        generateCsrf($data);
         $data['content'] = $post['content'];
         render(200, 'postedit', $mustache, $data);
     }
     $data['content'] = $_POST['content'];
     $data['errors'] = [];
+    checkCsrf($mustache, $data);
     validatePost($config, $baseurl, $data['errors']);
     if (count($data['errors']) === 0) {
         checkRateLimit($config, $mustache, $data, 'postedit', 5, 300);
@@ -1145,6 +1170,7 @@ if ($method === 'GET' && preg_match('/^(p[0-9]{1,3})?$/', $uri, $queryString)) {
 } else if ($method === 'GET' && $uri == 'upload') {
     if (!$data['is_logged_in'])
         redirect($baseurl . 'login');
+    generateCsrf($data);
     render(200, 'upload', $mustache, $data);
 } else if ($method === 'POST' && $uri == 'upload') {
     if (!$data['is_logged_in'])
