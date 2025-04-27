@@ -230,6 +230,7 @@ function sendResetEmail($email, $baseurl, $code, $apiKey)
 
 function sendNotificationEmails($db, $threadId, $baseurl, $apiKey)
 {
+    $emails = [];
     $query = $db->prepare('SELECT title FROM threads WHERE id = :id LIMIT 1');
     $query->bindValue(':id', $threadId);
     $query->execute();
@@ -244,7 +245,6 @@ function sendNotificationEmails($db, $threadId, $baseurl, $apiKey)
     preg_match_all('/@([a-zA-Z0-9_-]{1,50})/', $_POST['content'], $matches);
     if (!empty($matches[1])) {
         $usernames = array_unique($matches[1]);
-        $emails = [];
         foreach ($usernames as $username) {
             $query = $db->prepare('SELECT email FROM users WHERE LOWER(username) = LOWER(:username) AND notifications = 1 LIMIT 1');
             $query->bindValue(':username', $username, PDO::PARAM_STR);
@@ -330,6 +330,32 @@ function updatePost($db, $id)
     $query->execute();
 }
 
+function movePost($db, $id, $threadId)
+{
+    $query = $db->prepare('SELECT id FROM threads WHERE id = :thread_id LIMIT 1');
+    $query->bindValue(':thread_id', $threadId);
+    $query->execute();
+    if (!$query->fetchColumn(0)) {
+        $_POST['title'] = 'New Thread';
+        $threadId = addThread($db);
+    }
+
+    $query = $db->prepare('UPDATE posts SET thread_id = :thread_id WHERE id = :id LIMIT 1');
+    $query->bindValue(':id', $id);
+    $query->bindValue(':thread_id', $threadId);
+    $query->execute();
+
+    $query = $db->prepare('SELECT user_id FROM posts WHERE thread_id = :thread_id ORDER BY id ASC LIMIT 1');
+    $query->bindValue(':thread_id', $threadId);
+    $query->execute();
+    $userId = $query->fetchColumn(0);
+
+    $query = $db->prepare('UPDATE threads SET user_id = :user_id WHERE id = :thread_id LIMIT 1');
+    $query->bindValue(':user_id', $userId);
+    $query->bindValue(':thread_id', $threadId);
+    $query->execute();
+}
+
 function updateThread($db, $id)
 {
     $query = $db->prepare('UPDATE threads SET title = :title WHERE id = :id');
@@ -344,7 +370,6 @@ function verifyUser($db, $code)
     $query->bindValue(':code', $code);
     $query->execute();
     $userId = $query->fetchColumn(0);
-
     if (!$userId)
         return FALSE;
 
@@ -468,7 +493,7 @@ function getThreads($db, $page = 1, $perPage = 20)
             'title' => $row['title'],
             'username' => $row['username'],
             'views' => formatViews($row['views']),
-            'total_posts' => $row['total_posts'],
+            'total_posts' => $row['total_posts'] - 1,
             'is_unread' => isset($_SESSION['username']) && (!$row['last_read_at'] || $row['last_read_at'] < $row['ts_updated']),
             'ts_updated' => timeAgo($row['ts_updated']),
             'avatar' => avatar($row['username']),
@@ -1072,6 +1097,7 @@ if ($method === 'GET' && preg_match('/^(p[0-9]{1,3})?$/', $uri, $queryString)) {
     if (!$post)
         return render(404, '404', $mustache, $data);
     $data['id'] = $postId;
+    $data['can_move'] = in_array($_SESSION['username'], $config['adminUsernames']);
     if ($method === 'GET') {
         $data['content'] = $post['content'];
         render(200, 'postedit', $mustache, $data);
@@ -1106,6 +1132,16 @@ if ($method === 'GET' && preg_match('/^(p[0-9]{1,3})?$/', $uri, $queryString)) {
     deletePost($config, $db, $postId);
     invalidateCache(['index', 'thread/' . $threadId . '/p']);
     redirect($baseurl . 'thread/' . $threadId . '/latest');
+} else if ($method === 'POST' && preg_match('/^post\/move\/([0-9]{1,100})$/', $uri, $queryString)) {
+    if (!$data['is_logged_in'] || !in_array($_SESSION['username'], $config['adminUsernames']))
+        redirect($baseurl . 'login');
+    checkCsrf($mustache, $data);
+    $postId = (int) $queryString[1];
+    $oldThreadId = getThreadId($db, $postId);
+    $newThreadId = (int) $_POST['thread_id'];
+    movePost($db, $postId, $newThreadId);
+    invalidateCache(['index', 'thread/' . $oldThreadId . '/p']);
+    redirect($baseurl);
 } else if ($method === 'GET' && $uri == 'upload') {
     if (!$data['is_logged_in'])
         redirect($baseurl . 'login');
