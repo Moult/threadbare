@@ -358,13 +358,15 @@ function verifyUser($db, $code)
     return TRUE;
 }
 
-function validateThread(&$errors)
+function validateThread($config, $baseurl, &$errors)
 {
     if (!isset($_POST['title']) || !is_string($_POST['title']) || strlen($_POST['title']) < 3 || strlen($_POST['title']) > 100) {
         $errors[] = 'Post title must be 3-100 characters.';
-    }
-    if (isset($_POST['title'])) {
+    } else if (isset($_POST['title']) && is_string($_POST['title'])) {
         $_POST['title'] = str_replace(["\r", "\n"], '', $_POST['title']);
+        if (!in_array($_SESSION['username'], $config['adminUsernames']) && !in_array($_SESSION['username'], $config['trustedUsernames']) && isSpam($config, $baseurl, $_POST['title'])) {
+            $errors[] = 'Thread title looks spamlike. Please reach out for help in the live chat.';
+        }
     }
 }
 
@@ -372,9 +374,8 @@ function validatePost($config, $baseurl, &$errors)
 {
     if (!isset($_POST['content']) || !is_string($_POST['content']) || strlen($_POST['content']) < 1 || strlen($_POST['content']) > 5000) {
         $errors[] = 'Post content must not be blank or exceed 5000 characters.';
-    }
-    if (!in_array($_SESSION['username'], $config['adminUsernames']) && !in_array($_SESSION['username'], $config['trustedUsernames']) && isset($_POST['content']) && $_POST['content'] && isSpam($config, $baseurl)) {
-        $errors[] = 'Post content looks spamlike. Please reach out for help in the live chat.';
+    } else if (!in_array($_SESSION['username'], $config['adminUsernames']) && !in_array($_SESSION['username'], $config['trustedUsernames']) && isSpam($config, $baseurl, $_POST['content'])) {
+        $errors[] = 'Post body looks spamlike. Please reach out for help in the live chat.';
     }
 }
 
@@ -752,7 +753,7 @@ function getThreadId(PDO $db, int $postId): int
     return (int) $query->fetchColumn();
 }
 
-function isSpam($config, $baseurl)
+function isSpam($config, $baseurl, $content)
 {
     $request = 'api_key=' . urlencode($config['akismetKey'])
         . '&blog=' . urlencode($baseurl)
@@ -761,7 +762,7 @@ function isSpam($config, $baseurl)
         . '&referrer=' . urlencode($_SERVER['HTTP_REFERER'])
         . '&comment_type=comment'
         . '&comment_author=' . urlencode($_SESSION['username'])
-        . '&comment_content=' . urlencode($_POST['content']);
+        . '&comment_content=' . urlencode($content);
 
     $host = $http_host = 'rest.akismet.com';
     $path = '/1.1/comment-check';
@@ -986,7 +987,7 @@ if ($method === 'GET' && preg_match('/^(p[0-9]{1,3})?$/', $uri, $queryString)) {
     checkCsrf($mustache, $data);
     checkRateLimit($config, $mustache, $data, 'post', 5, 10);
     $data['errors'] = [];
-    validateThread($data['errors']);
+    validateThread($config, $baseurl, $data['errors']);
     validatePost($config, $baseurl, $data['errors']);
     if (count($data['errors']) === 0) {
         checkRateLimit($config, $mustache, $data, 'post-success', 5, 300);
@@ -1054,7 +1055,7 @@ if ($method === 'GET' && preg_match('/^(p[0-9]{1,3})?$/', $uri, $queryString)) {
     }
     $data['title'] = $_POST['title'];
     $data['errors'] = [];
-    validateThread($data['errors']);
+    validateThread($config, $baseurl, $data['errors']);
     if (count($data['errors']) === 0) {
         checkRateLimit($config, $mustache, $data, 'threadedit', 5, 300);
         updateThread($db, $threadId);
