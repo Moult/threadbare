@@ -9,7 +9,7 @@
     {{#threads}}
     <li class="thread{{#is_unread}} unread{{/is_unread}}">
         <span class="avatar {{avatar}}">{{initial}}</span>
-        <span class="thread-title"><a href="{{baseurl}}thread/{{id}}">{{title}}</a></span>{{#is_unread}}<small> (New)</small>{{/is_unread}}<br />
+        <span class="thread-title"><a href="{{baseurl}}thread/{{id}}">{{title}}</a></span>{{#is_unread}}<small> (New)</small>{{/is_unread}}<br>
         <span class="metadata">by <strong>{{username}}</strong>, <strong>{{views}}</strong> views, <strong>{{total_posts}}</strong> replies, most recent by <strong>{{username}}</strong> {{ts_updated}}</span>
     </li>
     {{/threads}}
