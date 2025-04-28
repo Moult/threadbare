@@ -516,6 +516,7 @@ function getThreads($db, $page = 1, $perPage = 20)
             'last_username' => $row['last_username'],
             'views' => formatViews($row['views']),
             'total_posts' => $row['total_posts'] - 1,
+            'last_page' => ceil($row['total_posts'] / $perPage),
             'is_unread' => isset($_SESSION['username']) && (!$row['last_read_at'] || $row['last_read_at'] < $row['ts_updated']),
             'ts_updated' => timeAgo($row['ts_updated']),
             'avatar' => avatar($row['username']),
