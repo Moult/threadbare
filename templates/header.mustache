@@ -19,7 +19,12 @@
         <li><a href="{{baseurl}}">All Threads</a></li>
         <li class="button"><a href="{{baseurl}}post">New Post</a></li>
         {{#is_logged_in}}
-        <li><a href="{{baseurl}}logout">Logout</a></li>
+        <li>
+            <form action="{{baseurl}}logout" method="post" class="logout">
+                <input type="hidden" name="csrf" value="{{csrf}}">
+                <button type="submit">Logout</button>
+            </form>
+        </li>
         {{/is_logged_in}}
         {{^is_logged_in}}
         <li><a href="{{baseurl}}login">Login</a></li>

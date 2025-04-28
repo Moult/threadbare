@@ -66,6 +66,19 @@ nav ul li {
     float: left;
     margin-right: 20px;
 }
+nav .logout {
+    display: inline;
+}
+nav .logout button {
+    font-size: inherit;
+    background:none;
+    border:none;
+    color: #e14658;
+    cursor:pointer;
+}
+nav .logout button:hover {
+    color: #db2339;
+}
 .avatar {
     display: inline-block;
     float: left;

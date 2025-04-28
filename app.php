@@ -40,7 +40,7 @@ if (isset($_SESSION['username'])) {
 function generateCsrf(&$data)
 {
     $_SESSION['csrf'][] = $data['csrf'] = bin2hex(random_bytes(32));
-    if (count($_SESSION['csrf']) > 30) {
+    if (count($_SESSION['csrf']) > 50) {
         array_shift($_SESSION['csrf']);
     }
 }
@@ -963,6 +963,7 @@ class ForumMarkdown extends Parsedown
 $queryString = [];
 if ($method === 'GET' && preg_match('/^(p[0-9]{1,3})?$/', $uri, $queryString)) {
     tryRenderFromCache('index');
+    generateCsrf($data);
     $page = (count($queryString) === 2) ? (int) substr($queryString[1], 1) : 1;
     $data['threads'] = getThreads($db, $page, $perPage);
     $totalPages = ceil(getTotalThreads($db) / $perPage);
@@ -1057,7 +1058,8 @@ if ($method === 'GET' && preg_match('/^(p[0-9]{1,3})?$/', $uri, $queryString)) {
     $data['code'] = $queryString[1];
     $data['is_success'] = verifyUser($db, $queryString[1]);
     render(200, 'verify', $mustache, $data);
-} else if ($method === 'GET' && $uri === 'logout') {
+} else if ($method === 'POST' && $uri === 'logout') {
+    checkCsrf($mustache, $data);
     unset($_SESSION['username']);
     unset($_SESSION['user_id']);
     $_SESSION['csrf'] = [];
