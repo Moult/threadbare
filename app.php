@@ -359,14 +359,19 @@ function movePost($db, $id, $threadId)
     $query->bindValue(':thread_id', $threadId);
     $query->execute();
 
-    $query = $db->prepare('SELECT user_id FROM posts WHERE thread_id = :thread_id ORDER BY id ASC LIMIT 1');
-    $query->bindValue(':thread_id', $threadId);
+    $query = $db->prepare('
+        SELECT 
+            (SELECT user_id FROM posts WHERE thread_id = :thread_id ORDER BY id ASC LIMIT 1) AS first_user_id,
+            (SELECT user_id FROM posts WHERE thread_id = :thread_id ORDER BY id DESC LIMIT 1) AS last_user_id
+    ');
+    $query->bindValue(':thread_id', $threadId, PDO::PARAM_INT);
     $query->execute();
-    $userId = $query->fetchColumn(0);
+    $row = $query->fetch(PDO::FETCH_ASSOC);
 
-    $query = $db->prepare('UPDATE threads SET user_id = :user_id WHERE id = :thread_id LIMIT 1');
-    $query->bindValue(':user_id', $userId);
-    $query->bindValue(':thread_id', $threadId);
+    $query = $db->prepare('UPDATE threads SET user_id = :user_id AND last_user_id = :last_user_id WHERE id = :thread_id LIMIT 1');
+    $query->bindValue(':thread_id', $threadId, PDO::PARAM_INT);
+    $query->bindValue(':user_id', $row['first_user_id'], PDO::PARAM_INT);
+    $query->bindValue(':last_user_id', $row['last_user_id'], PDO::PARAM_INT);
     $query->execute();
 }
 
@@ -440,8 +445,9 @@ function addPost($db, $threadId)
     $query->execute();
     $postId = $db->lastInsertId();
 
-    $query = $db->prepare('UPDATE threads SET ts_updated = :ts_updated WHERE id = :thread_id');
+    $query = $db->prepare('UPDATE threads SET last_user_id = :user_id AND ts_updated = :ts_updated WHERE id = :thread_id');
     $query->bindValue(':thread_id', $threadId);
+    $query->bindValue(':user_id', $_SESSION['user_id']);
     $query->bindValue(':ts_updated', time());
     $query->execute();
     return $postId;
@@ -485,9 +491,10 @@ function getThreads($db, $page = 1, $perPage = 20)
 {
     $results = [];
     $query = $db->prepare('
-        SELECT t.id, t.title, t.views, r.last_read_at, t.user_id, u.username, u.email, t.ts_created, t.ts_updated, count(p.id) AS total_posts
+        SELECT t.id, t.title, t.views, r.last_read_at, t.user_id, u.username, lu.username AS last_username, u.email, t.ts_created, t.ts_updated, count(p.id) AS total_posts
         FROM threads AS t
         LEFT JOIN users AS u ON t.user_id = u.id
+        LEFT JOIN users AS lu ON t.last_user_id = lu.id
         LEFT JOIN posts AS p ON p.thread_id = t.id
         LEFT JOIN thread_reads AS r ON r.thread_id = t.id AND r.user_id = :user_id
         GROUP BY t.id ORDER BY t.ts_updated DESC
@@ -506,6 +513,7 @@ function getThreads($db, $page = 1, $perPage = 20)
             'id' => $row['id'],
             'title' => $row['title'],
             'username' => $row['username'],
+            'last_username' => $row['last_username'],
             'views' => formatViews($row['views']),
             'total_posts' => $row['total_posts'] - 1,
             'is_unread' => isset($_SESSION['username']) && (!$row['last_read_at'] || $row['last_read_at'] < $row['ts_updated']),
@@ -689,12 +697,22 @@ function deletePost($config, $db, $id)
     $query->execute();
     $query->fetch();
 
-    $query = $db->prepare('SELECT id FROM posts WHERE thread_id = :thread_id LIMIT 1');
-    $query->bindValue(':thread_id', $threadId);
+    $query = $db->prepare('
+        SELECT 
+            (SELECT user_id FROM posts WHERE thread_id = :thread_id ORDER BY id ASC LIMIT 1) AS first_user_id,
+            (SELECT user_id FROM posts WHERE thread_id = :thread_id ORDER BY id DESC LIMIT 1) AS last_user_id
+    ');
+    $query->bindValue(':thread_id', $threadId, PDO::PARAM_INT);
     $query->execute();
-    $row = $query->fetch();
+    $row = $query->fetch(PDO::FETCH_ASSOC);
 
-    if (!$row) {
+    if ($row['first_user_id'] && $row['last_user_id']) {
+        $query = $db->prepare('UPDATE threads SET user_id = :user_id AND last_user_id = :last_user_id WHERE id = :thread_id LIMIT 1');
+        $query->bindValue(':thread_id', $threadId, PDO::PARAM_INT);
+        $query->bindValue(':user_id', $row['first_user_id'], PDO::PARAM_INT);
+        $query->bindValue(':last_user_id', $row['last_user_id'], PDO::PARAM_INT);
+        $query->execute();
+    } else {
         $query = $db->prepare('DELETE FROM threads WHERE id = :id LIMIT 1');
         $query->bindValue(':id', $threadId);
         $query->execute();

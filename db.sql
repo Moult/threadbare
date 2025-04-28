@@ -19,11 +19,13 @@ CREATE TABLE "threads" (
 	"id"	INTEGER NOT NULL UNIQUE,
 	"title"	TEXT NOT NULL,
 	"user_id"	INTEGER NOT NULL,
+	"last_user_id"	INTEGER,
 	"ts_created"	INTEGER NOT NULL,
 	"ts_updated"	INTEGER NOT NULL,
     "views"	INTEGER NOT NULL DEFAULT 0,
 	PRIMARY KEY("id" AUTOINCREMENT)
-    FOREIGN KEY("user_id") REFERENCES "users"("id") ON DELETE CASCADE
+    FOREIGN KEY("user_id") REFERENCES "users"("id") ON DELETE CASCADE,
+    FOREIGN KEY("last_user_id") REFERENCES "users"("id") ON DELETE SET NULL
 );
 
 CREATE TABLE "posts" (
