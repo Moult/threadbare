@@ -105,6 +105,7 @@ nav ul li {
 }
 .thread:hover {
     background-color: #f3f6f9;
+    cursor: pointer;
 }
 .metadata {
     font-size: 12px;
