@@ -25,13 +25,15 @@
             &blacktriangledown;
             {{/user_upvote}}
             {{/user_vote}}
-<form action="{{baseurl}}vote" method="post" class="vote-form">
-  <input type="hidden" name="csrf" value="{{csrf}}">
-  <input type="hidden" name="post_id" value="{{id}}">
-  <input type="hidden" name="page" value="{{page}}">
-  <button name="vote" value="1" {{#user_vote_is_upvoted}}disabled{{/user_vote_is_upvoted}}>&blacktriangle;</button>
-  <button name="vote" value="-1" {{#user_vote_is_downvoted}}disabled{{/user_vote_is_downvoted}}>&blacktriangledown;</button>
-</form>
+            {{#can_vote}}
+            <form action="{{baseurl}}vote" method="post" class="vote-form">
+              <input type="hidden" name="csrf" value="{{csrf}}">
+              <input type="hidden" name="post_id" value="{{id}}">
+              <input type="hidden" name="page" value="{{page}}">
+              <button name="vote" value="1" {{#user_vote_is_upvoted}}disabled{{/user_vote_is_upvoted}}>&blacktriangle;</button>
+              <button name="vote" value="-1" {{#user_vote_is_downvoted}}disabled{{/user_vote_is_downvoted}}>&blacktriangledown;</button>
+            </form>
+            {{/can_vote}}
         </span>
         <article>
             {{{content}}}

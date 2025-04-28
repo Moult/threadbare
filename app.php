@@ -639,6 +639,7 @@ function getThread($config, $mustache, $db, $threadId, $page, $perPage, &$data)
         $content = preProcessMentions($content);
         $content = $Parsedown->text($content);
         $content = postProcessMentions($content);
+        $row['can_vote'] = !empty($_SESSION['user_id']) && $_SESSION['user_id'] !== $row['user_id'];
         $row['has_votes'] = $row['upvotes'] || $row['downvotes'];
         $row['user_upvote'] = $row['user_vote'] === 1;
         $row['user_vote'] = $row['user_vote'] !== NULL;
@@ -1233,9 +1234,15 @@ if ($method === 'GET' && preg_match('/^(p[0-9]{1,3})?$/', $uri, $queryString)) {
         redirect($baseurl . 'login');
     checkCsrf($mustache, $data);
     $postId = isset($_POST['post_id']) ? (int) $_POST['post_id'] : 0;
+    $query = $db->prepare('SELECT id FROM posts WHERE id = :id AND user_id != :user_id LIMIT 1');
+    $query->bindValue(':user_id', $_SESSION['user_id']);
+    $query->bindValue(':id', $postId);
+    $query->execute();
+    if (!$query->fetch())
+        redirect($baseurl . 'login');
     $vote = isset($_POST['vote']) ? (int) $_POST['vote'] : 0;
     $page = isset($_POST['page']) ? (int) $_POST['page'] : 1;
-    if ($postId > 0 && in_array($vote, [-1, 1])) {
+    if (in_array($vote, [-1, 1])) {
         addVote($db, $postId, $vote);
     }
     $threadId = getThreadId($db, $postId);
