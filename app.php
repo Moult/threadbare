@@ -13,7 +13,7 @@ if (empty($_SESSION['ratelimit'])) {
 $config = require_once (__DIR__ . '/config.php');
 require_once (__DIR__ . '/vendor/autoload.php');
 
-header("Content-Security-Policy: default-src 'self'; script-src 'self' https://hcaptcha.com https://*.hcaptcha.com; frame-src 'self' https://hcaptcha.com https://*.hcaptcha.com; style-src 'self' https://hcaptcha.com https://*.hcaptcha.com; connect-src 'self' https://hcaptcha.com https://*.hcaptcha.com; img-src * data: blob:; media-src 'self' " . $config['cspUrls'] . ';');
+header("Content-Security-Policy: default-src 'self'; script-src 'self' https://hcaptcha.com https://*.hcaptcha.com; frame-src 'self' https://hcaptcha.com https://*.hcaptcha.com https://www.youtube.com; style-src 'self' https://hcaptcha.com https://*.hcaptcha.com; connect-src 'self' https://hcaptcha.com https://*.hcaptcha.com; img-src * data: blob:; media-src 'self' " . $config['cspUrls'] . ';');
 header('X-Frame-Options: DENY');
 header('X-Content-Type-Options: nosniff');
 if (!empty($_SERVER['HTTPS']) && $_SERVER['HTTPS'] !== 'off') {
@@ -898,40 +898,47 @@ class ForumMarkdown extends Parsedown
 {
     protected function inlineImage($excerpt)
     {
-        if ( ! isset($Excerpt['text'][1]) or $Excerpt['text'][1] !== '[')
-            return;
-        $Excerpt['text']= substr($Excerpt['text'], 1);
-        $Link = $this->inlineLink($Excerpt);
-        if ($Link === null)
-            return;
-        if ($Link['element']['name'] === 'video')
-            return $Link;
-        $Inline = array(
-            'extent' => $Link['extent'] + 1,
-            'element' => array(
-                'name' => 'img',
-                'attributes' => array(
-                    'src' => $Link['element']['attributes']['href'],
-                    'alt' => $Link['element']['text'],
-                ),
-            ),
-        );
-        $Inline['element']['attributes'] += $Link['element']['attributes'];
-        $Inline['element']['attributes']['loading'] = 'lazy';
-        unset($Inline['element']['attributes']['href']);
-        return $Inline;
+        $element = parent::inlineImage($excerpt);
+        if ($element) {
+            $element['element']['attributes']['loading'] = 'lazy';
+        }
+        return $element;
     }
 
     protected function inlineLink($excerpt)
     {
         $element = parent::inlineLink($excerpt);
-        if (!isset($element))
-            return;
+        if ($element) {
+            $element['element']['attributes']['rel'] = 'nofollow';
+        }
+        return $element;
+    }
+
+    protected function inlineUrl($excerpt)
+    {
+        $element = parent::inlineUrl($excerpt);
+        if (!$element)
+            return $element;
+        $youtubePattern = '~(?:https?://)?(?:www\.)?(?:m\.)?(?:youtube\.com/watch\?v=|youtu\.be/|youtube\.com/embed/|youtube\.com/shorts/)([A-Za-z0-9_-]{11})~i';
+        if (preg_match($youtubePattern, $element['element']['attributes']['href'], $matches)) {
+            $videoId = htmlspecialchars($matches[1], ENT_QUOTES, 'UTF-8');
+            return [
+                'extent' => $element['extent'],
+                'position' => $element['position'],
+                'element' => [
+                    'name' => 'iframe',
+                    'attributes' => ['src' => 'https://www.youtube.com/embed/' . $videoId, 'frameborder' => '0', 'allowfullscreen' => TRUE],
+                    'handler' => 'element',
+                    'text' => [],
+                ],
+            ];
+        }
         $mime = ['mp4' => 'video/mp4', 'webm' => 'video/webm', 'ogg' => 'video/ogg'];
         foreach ($mime as $ext => $mimetype) {
             if (str_ends_with(strtolower($element['element']['attributes']['href']), strtolower($ext))) {
                 return [
-                    'extent' => $element['extent'] + 1,
+                    'extent' => $element['extent'],
+                    'position' => $element['position'],
                     'element' => [
                         'name' => 'video',
                         'attributes' => ['width' => '100%', 'controls' => true],
@@ -939,13 +946,14 @@ class ForumMarkdown extends Parsedown
                         'text' => [
                             'name' => 'source',
                             'attributes' => [
-                                'src' => $element['element']['attributes']['href'], 'type' => $mimetype
+                                'src' => htmlspecialchars($element['element']['attributes']['href']), 'type' => $mimetype
                             ]
                         ],
                     ],
                 ];
             }
         }
+        $element['element']['attributes']['rel'] = 'nofollow';
         return $element;
     }
 }
