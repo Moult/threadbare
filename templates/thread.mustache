@@ -3,8 +3,8 @@
 {{#can_edit}}
 <p><a href="{{baseurl}}thread/edit/{{id}}">Edit thread</a></p>
 {{/can_edit}}
-{{#posts}}
 <ol class="posts">
+{{#posts}}
     <li class="post">
         <a id="{{id}}"></a>
         <span class="avatar {{avatar}}">{{initial}}</span>
@@ -39,8 +39,8 @@
             {{{content}}}
         </article>
     </li>
-</ol>
 {{/posts}}
+</ol>
 {{#has_pagination}}
 <ol class="pagination">
     {{#pages}}
