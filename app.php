@@ -286,8 +286,8 @@ function sendNotificationEmails($config, $db, $threadId)
     if (!$emails)
         return;
 
-    $url = $baseurl . 'thread/' . $threadId . '/latest';
-    $url2 = $baseurl . 'notifications';
+    $url = $config['baseurl'] . 'thread/' . $threadId . '/latest';
+    $url2 = $config['baseurl'] . 'notifications';
     $title = preg_replace('/[\x00-\x1F\x7F]/u', '', $title);
     $username = preg_replace('/[\x00-\x1F\x7F]/u', '', $_SESSION['username']);
     $plain = $username . ' has posted on the thread "' . $title . '". Check it out!' . "\n\n" . $url;
