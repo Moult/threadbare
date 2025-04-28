@@ -368,7 +368,7 @@ function movePost($db, $id, $threadId)
     $query->execute();
     $row = $query->fetch(PDO::FETCH_ASSOC);
 
-    $query = $db->prepare('UPDATE threads SET user_id = :user_id AND last_user_id = :last_user_id WHERE id = :thread_id LIMIT 1');
+    $query = $db->prepare('UPDATE threads SET user_id = :user_id, last_user_id = :last_user_id WHERE id = :thread_id LIMIT 1');
     $query->bindValue(':thread_id', $threadId, PDO::PARAM_INT);
     $query->bindValue(':user_id', $row['first_user_id'], PDO::PARAM_INT);
     $query->bindValue(':last_user_id', $row['last_user_id'], PDO::PARAM_INT);
@@ -445,7 +445,7 @@ function addPost($db, $threadId)
     $query->execute();
     $postId = $db->lastInsertId();
 
-    $query = $db->prepare('UPDATE threads SET last_user_id = :user_id AND ts_updated = :ts_updated WHERE id = :thread_id');
+    $query = $db->prepare('UPDATE threads SET last_user_id = :user_id, ts_updated = :ts_updated WHERE id = :thread_id');
     $query->bindValue(':thread_id', $threadId);
     $query->bindValue(':user_id', $_SESSION['user_id']);
     $query->bindValue(':ts_updated', time());
@@ -710,7 +710,7 @@ function deletePost($config, $db, $id)
     $row = $query->fetch(PDO::FETCH_ASSOC);
 
     if ($row['first_user_id'] && $row['last_user_id']) {
-        $query = $db->prepare('UPDATE threads SET user_id = :user_id AND last_user_id = :last_user_id WHERE id = :thread_id LIMIT 1');
+        $query = $db->prepare('UPDATE threads SET user_id = :user_id, last_user_id = :last_user_id WHERE id = :thread_id LIMIT 1');
         $query->bindValue(':thread_id', $threadId, PDO::PARAM_INT);
         $query->bindValue(':user_id', $row['first_user_id'], PDO::PARAM_INT);
         $query->bindValue(':last_user_id', $row['last_user_id'], PDO::PARAM_INT);
