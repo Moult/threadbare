@@ -1,5 +1,20 @@
 <?php
 
+$config = require_once (__DIR__ . '/config.php');
+require_once (__DIR__ . '/vendor/autoload.php');
+
+// https://www.php.net/manual/en/session.security.ini.php
+ini_set('session.cookie_lifetime', 0);
+ini_set('session.use_cookies', 1);
+ini_set('session.use_only_cookies', 1);
+ini_set('session.use_strict_mode', 1);
+ini_set('session.cookie_httponly', 1);
+ini_set('session.cookie_secure', str_starts_with($config['baseurl'], 'https'));
+ini_set('session.cookie_samesite', 'Strict');
+ini_set('session.use_trans_sid', 0);
+ini_set('session.cache_limiter', 'nocache');
+ini_set('session.save_path', $config['sessionSavePath']);
+
 session_start();
 
 if (empty($_SESSION['csrf']) || !is_array($_SESSION['csrf'])) {
@@ -9,9 +24,6 @@ if (empty($_SESSION['csrf']) || !is_array($_SESSION['csrf'])) {
 if (empty($_SESSION['ratelimit'])) {
     $_SESSION['ratelimit'] = ['attempts' => 0, 'time' => time()];
 }
-
-$config = require_once (__DIR__ . '/config.php');
-require_once (__DIR__ . '/vendor/autoload.php');
 
 header("Content-Security-Policy: default-src 'self'; script-src 'self' https://hcaptcha.com https://*.hcaptcha.com; frame-src 'self' https://hcaptcha.com https://*.hcaptcha.com https://www.youtube.com; style-src 'self' https://hcaptcha.com https://*.hcaptcha.com; connect-src 'self' https://hcaptcha.com https://*.hcaptcha.com; img-src * data: blob:; media-src 'self' " . $config['cspUrls'] . ';');
 header('X-Frame-Options: DENY');
@@ -110,7 +122,7 @@ function validateLogin($db)
 
 function login($user)
 {
-    session_regenerate_id();
+    session_regenerate_id(TRUE);
     $_SESSION['user_id'] = $user['id'];
     $_SESSION['username'] = $user['username'];
 }

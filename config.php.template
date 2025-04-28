@@ -8,6 +8,7 @@ return [
     'emailFrom' => 'noreply@website.example',
     'maxUploadMb' => 5,
     'cspUrls' => 'https://website.example',
+    'sessionSavePath' => '/path/to/private/session/storage/tmp/directory',
     'akismetKey' => '',
     'sendGridKey' => '',
     'hCaptchaSiteKey' => '',
