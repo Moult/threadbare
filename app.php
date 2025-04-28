@@ -21,10 +21,6 @@ if (empty($_SESSION['csrf']) || !is_array($_SESSION['csrf'])) {
     $_SESSION['csrf'] = [];
 }
 
-if (empty($_SESSION['ratelimit'])) {
-    $_SESSION['ratelimit'] = ['attempts' => 0, 'time' => time()];
-}
-
 header("Content-Security-Policy: default-src 'self'; script-src 'self' https://hcaptcha.com https://*.hcaptcha.com; frame-src 'self' https://hcaptcha.com https://*.hcaptcha.com https://www.youtube.com; style-src 'self' https://hcaptcha.com https://*.hcaptcha.com; connect-src 'self' https://hcaptcha.com https://*.hcaptcha.com; img-src * data: blob:; media-src 'self' " . $config['cspUrls'] . ';');
 header('X-Frame-Options: DENY');
 header('X-Content-Type-Options: nosniff');
@@ -75,19 +71,18 @@ function checkRateLimit($config, $mustache, $data, $key = 'login', $limit = 3, $
     if (isset($_SESSION['username']) && in_array($_SESSION['username'], $config['adminUsernames']))
         return;
     $now = time();
-    if (!isset($_SESSION['ratelimit'][$key])) {
-        $_SESSION['ratelimit'][$key] = ['attempts' => 0, 'time' => $now];
-    }
-
-    $record = &$_SESSION['ratelimit'][$key];
-
-    if (($now - $record['time']) < $window) {
+    $rateKey = 'ratelimit_' . md5($config['salt'] . $_SERVER['REMOTE_ADDR'] . $key);
+    $record = apcu_fetch($rateKey);
+    if (!$record) {
+        $record = ['attempts' => 1, 'time' => $now];
+    } elseif ($now - $record['time'] < $window) {
         $record['attempts']++;
         if ($record['attempts'] > $limit)
             render(429, '429', $mustache, $data);
     } else {
         $record = ['attempts' => 1, 'time' => $now];
     }
+    apcu_store($rateKey, $record, $window);
 }
 
 function checkCaptcha($mustache, $config)
@@ -372,7 +367,7 @@ function movePost($db, $id, $threadId)
     $query->execute();
 
     $query = $db->prepare('
-        SELECT 
+        SELECT
             (SELECT user_id FROM posts WHERE thread_id = :thread_id ORDER BY id ASC LIMIT 1) AS first_user_id,
             (SELECT user_id FROM posts WHERE thread_id = :thread_id ORDER BY id DESC LIMIT 1) AS last_user_id
     ');
@@ -1134,6 +1129,7 @@ if ($method === 'GET' && preg_match('/^(p[0-9]{1,3})?$/', $uri, $queryString)) {
     $data['errors'] = [];
     validatePost($config, $baseurl, $data['errors']);
     if (count($data['errors']) === 0) {
+        checkRateLimit($config, $mustache, $data, 'post-success', 5, 300);
         $postId = addPost($db, $threadId);
         sendNotificationEmails($config, $db, $threadId);
         $totalPages = ceil(getTotalPosts($db, $threadId) / $perPage);
