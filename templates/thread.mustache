@@ -10,7 +10,7 @@
         <span class="avatar {{avatar}}">{{initial}}</span>
         <span class="metadata">
             by <strong>{{username}}</strong> on <strong>{{ts_created}}</strong>{{#ts_updated}}, edited <strong>{{ts_updated}}</strong>{{/ts_updated}}
-            <a href="{{baseurl}}thread/{{thread_id}}#{{id}}">#</a>
+            <a href="{{baseurl}}thread/{{thread_id}}/p{{page}}#{{id}}">#</a>
             {{#can_edit}}
             <a href="{{baseurl}}post/edit/{{id}}">edit</a>
             {{/can_edit}}
