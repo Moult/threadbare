@@ -190,6 +190,7 @@ ol.pagination {
     overflow: hidden;
     clear: both;
     font-size: 12px;
+    margin-top: 10px;
 }
 ol.pagination li {
     float: left;

@@ -568,6 +568,7 @@ function getPaginationPages(int $currentPage, int $totalPages): array
         $pagesWithGaps[] = ['page' => $page, 'is_active' => $page === $currentPage];
         $prev = $page;
     }
+    $pagesWithGaps[0]['is_first'] = TRUE;
     return $pagesWithGaps;
 }
 

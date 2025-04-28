@@ -13,12 +13,9 @@
     {{/threads}}
 </ol>
 {{#has_pagination}}
-<p>
-Go to page:
-</p>
 <ol class="pagination">
     {{#pages}}
-    <li{{#is_active}} class="active"{{/is_active}}>{{#page}}<a href="{{baseurl}}p{{page}}">{{page}}</a>{{/page}}{{^page}}<span>…</span>{{/page}}</li>
+    <li{{#is_active}} class="active"{{/is_active}}>{{#page}}<a href="{{baseurl}}p{{page}}">{{#is_first}}Page {{/is_first}}{{page}}</a>{{/page}}{{^page}}<span>…</span>{{/page}}</li>
     {{/pages}}
 </ol>
 {{/has_pagination}}
