@@ -60,7 +60,7 @@ function checkCsrf($mustache, &$data)
 
 function checkRateLimit($config, $mustache, $data, $key = 'login', $limit = 3, $window = 300)
 {
-    if (in_array($_SESSION['username'], $config['adminUsernames']))
+    if (isset($_SESSION['username']) && in_array($_SESSION['username'], $config['adminUsernames']))
         return;
     $now = time();
     if (!isset($_SESSION['ratelimit'][$key])) {
