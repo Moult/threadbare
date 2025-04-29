@@ -943,8 +943,9 @@ class ForumMarkdown extends Parsedown
             ];
         }
         $mime = ['mp4' => 'video/mp4', 'webm' => 'video/webm', 'ogg' => 'video/ogg'];
+        $urlPath = strtolower(parse_url($element['element']['attributes']['href'])['path']);
         foreach ($mime as $ext => $mimetype) {
-            if (str_ends_with(strtolower($element['element']['attributes']['href']), strtolower($ext))) {
+            if (str_ends_with($urlPath, $ext)) {
                 return [
                     'extent' => $element['extent'],
                     'position' => $element['position'],
