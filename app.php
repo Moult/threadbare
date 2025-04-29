@@ -937,8 +937,8 @@ class ForumMarkdown extends Parsedown
                 'element' => [
                     'name' => 'iframe',
                     'attributes' => ['src' => 'https://www.youtube.com/embed/' . $videoId, 'frameborder' => '0', 'allowfullscreen' => TRUE],
-                    'handler' => 'element',
-                    'text' => NULL,
+                    'handler' => 'line',
+                    'text' => '',
                 ],
             ];
         }
