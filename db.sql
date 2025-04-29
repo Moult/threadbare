@@ -5,6 +5,7 @@ CREATE TABLE "users" (
 	"email"	TEXT NOT NULL UNIQUE,
 	"is_verified"	INTEGER NOT NULL,
 	"notifications"	INTEGER NOT NULL DEFAULT 1,
+	"session_token"	TEXT,
 	PRIMARY KEY("id" AUTOINCREMENT)
 );
 

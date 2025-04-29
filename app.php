@@ -85,6 +85,42 @@ function checkRateLimit($config, $mustache, $data, $key = 'login', $limit = 3, $
     apcu_store($rateKey, $record, $window);
 }
 
+function logout()
+{
+    unset($_SESSION['username']);
+    unset($_SESSION['user_id']);
+    $_SESSION['csrf'] = [];
+    session_unset();
+    session_destroy();
+}
+
+function getSessionToken($db)
+{
+    $query = $db->prepare('SELECT session_token FROM users WHERE id = :id LIMIT 1');
+    $query->bindValue(':id', $_SESSION['user_id']);
+    $query->execute();
+    return $query->fetchColumn(0);
+}
+
+function checkSessionToken($baseurl, $db)
+{
+    if (isset($_SESSION['username']) && (empty($_SESSION['token']) || $_SESSION['token'] !== getSessionToken($db)))
+    {
+        logout();
+        redirect($baseurl . 'login');
+    }
+}
+
+function regenerateSessionToken($db)
+{
+    $token = bin2hex(random_bytes(32));
+    $query = $db->prepare('UPDATE users SET session_token = :session_token WHERE id = :id');
+    $query->bindValue(':id', $_SESSION['user_id']);
+    $query->bindValue(':session_token', $token);
+    $query->execute();
+    $_SESSION['token'] = $token;
+}
+
 function checkCaptcha($mustache, $config)
 {
     $data = ['secret' => $config['hCaptchaSecretKey'], 'response' => $_POST['h-captcha-response']];
@@ -115,11 +151,15 @@ function validateLogin($db)
     return FALSE;
 }
 
-function login($user)
+function login($db, $user)
 {
     session_regenerate_id(TRUE);
     $_SESSION['user_id'] = $user['id'];
     $_SESSION['username'] = $user['username'];
+    $_SESSION['token'] = getSessionToken($db);
+    if (!$_SESSION['token']) {
+        regenerateSessionToken($db);
+    }
 }
 
 function validatePassword()
@@ -968,6 +1008,8 @@ class ForumMarkdown extends Parsedown
     }
 }
 
+checkSessionToken($baseurl, $db);
+
 $queryString = [];
 if ($method === 'GET' && preg_match('/^(p[0-9]{1,3})?$/', $uri, $queryString)) {
     tryRenderFromCache('index');
@@ -987,7 +1029,7 @@ if ($method === 'GET' && preg_match('/^(p[0-9]{1,3})?$/', $uri, $queryString)) {
     checkRateLimit($config, $mustache, $data, 'login', 5, 300);
     $user = validateLogin($db);
     if ($user !== FALSE) {
-        login($user);
+        login($db, $user);
         redirect($baseurl);
     }
     $data['has_login_error'] = TRUE;
@@ -1042,6 +1084,7 @@ if ($method === 'GET' && preg_match('/^(p[0-9]{1,3})?$/', $uri, $queryString)) {
         $data['errors'] = validatePassword();
         if (count($data['errors']) === 0) {
             updatePassword($db, $userId);
+            regenerateSessionToken($db);
             $data['is_success'] = TRUE;
         }
     }
@@ -1068,11 +1111,7 @@ if ($method === 'GET' && preg_match('/^(p[0-9]{1,3})?$/', $uri, $queryString)) {
     render(200, 'verify', $mustache, $data);
 } else if ($method === 'POST' && $uri === 'logout') {
     checkCsrf($mustache, $data);
-    unset($_SESSION['username']);
-    unset($_SESSION['user_id']);
-    $_SESSION['csrf'] = [];
-    session_unset();
-    session_destroy();
+    logout();
     redirect($baseurl);
 } else if ($method === 'GET' && $uri === 'post') {
     if (!$data['is_logged_in'])
