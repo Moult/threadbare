@@ -36,7 +36,6 @@ $db = new \PDO('sqlite:' . __DIR__ . '/threadbare.db');
 $db->exec('PRAGMA foreign_keys = ON;');
 $method = $_SERVER['REQUEST_METHOD'];
 $uri = trim($_SERVER['REQUEST_URI'], '/');
-$mustache = new Mustache_Engine(['loader' => new Mustache_Loader_FilesystemLoader(__DIR__ . '/templates/')]);
 $data = ['baseurl' => $baseurl, 'csrf' => $_SESSION['csrf'], 'captcha' => $config['hCaptchaSiteKey'], 'html_title' => $config['websiteTitle'], 'h1' => $config['websiteTitle'], 'blurb' => $config['blurb']];
 if (isset($_SESSION['username'])) {
     $data['is_logged_in'] = TRUE;
@@ -53,20 +52,20 @@ function generateCsrf(&$data)
     }
 }
 
-function checkCsrf($mustache, &$data)
+function checkCsrf(&$data)
 {
     if (!isset($_POST['csrf']))
-        render(403, '403', $mustache, $data);
+        render(403, '403', $data);
     foreach ($_SESSION['csrf'] as $csrf) {
         if (hash_equals($csrf, $_POST['csrf'])) {
             generateCsrf($data);
             return;
         }
     }
-    render(403, '403', $mustache, $data);
+    render(403, '403', $data);
 }
 
-function checkRateLimit($config, $mustache, $data, $key = 'login', $limit = 3, $window = 300)
+function checkRateLimit($config, $data, $key = 'login', $limit = 3, $window = 300)
 {
     if (isset($_SESSION['username']) && in_array($_SESSION['username'], $config['adminUsernames']))
         return;
@@ -78,7 +77,7 @@ function checkRateLimit($config, $mustache, $data, $key = 'login', $limit = 3, $
     } elseif ($now - $record['time'] < $window) {
         $record['attempts']++;
         if ($record['attempts'] > $limit)
-            render(429, '429', $mustache, $data);
+            render(429, '429', $data);
     } else {
         $record = ['attempts' => 1, 'time' => $now];
     }
@@ -121,7 +120,7 @@ function regenerateSessionToken($db)
     $_SESSION['token'] = $token;
 }
 
-function checkCaptcha($mustache, $config)
+function checkCaptcha($config)
 {
     $data = ['secret' => $config['hCaptchaSecretKey'], 'response' => $_POST['h-captcha-response']];
     $verify = curl_init();
@@ -132,7 +131,7 @@ function checkCaptcha($mustache, $config)
     $response = curl_exec($verify);
     $responseData = json_decode($response);
     if (!$responseData->success)
-        render(403, '403', $mustache, $data);
+        render(403, '403', $data);
 }
 
 function validateLogin($db)
@@ -189,8 +188,8 @@ function validateRegistration($config, $db)
             $_POST[$field] = str_replace(["\r", "\n"], '', $_POST[$field]);
         }
     }
-    if (isset($_POST['username']) && !preg_match('/^[a-zA-Z0-9 _-]+$/', $_POST['username'])) {
-        $errors[] = 'Username can only contain letters, numbers, spaces, underscores, and hyphens.';
+    if (isset($_POST['username']) && !preg_match('/^[a-zA-Z0-9_-]+$/', $_POST['username'])) {
+        $errors[] = 'Username can only contain letters, numbers, underscores, and hyphens.';
     }
     if (preg_match('/\s{2,}/', $_POST['username']) || preg_match('/^\s|\s$/', $_POST['username'])) {
         $errors[] = 'Username cannot have leading/trailing or multiple consecutive spaces.';
@@ -643,7 +642,7 @@ function timeAgo(int $timestamp): string
     return floor($diff / 29030400) . ' year' . ($diff < 58060800 ? '' : 's') . ' ago';
 }
 
-function getThread($config, $mustache, $db, $threadId, $page, $perPage, &$data)
+function getThread($config, $db, $threadId, $page, $perPage, &$data)
 {
     $query = $db->prepare('
         SELECT t.id, t.title, t.user_id, u.username, t.ts_created, t.ts_updated
@@ -652,7 +651,7 @@ function getThread($config, $mustache, $db, $threadId, $page, $perPage, &$data)
     $query->execute();
     $row = $query->fetch();
     if (!$row)
-        render(404, '404', $mustache, $data);
+        render(404, '404', $data);
     $data['title'] = $row['title'];
     $data['can_edit'] = isset($_SESSION['user_id']) ? $row['user_id'] === $_SESSION['user_id'] || in_array($_SESSION['username'], $config['adminUsernames']) : FALSE;
     $data['posts'] = [];
@@ -780,7 +779,7 @@ function deleteThread($config, $db, $id)
 function handleUpload($config, $db)
 {
     if (!isset($_FILES['attachment']) || $_FILES['attachment']['error'] !== UPLOAD_ERR_OK)
-        render(400, '400', $mustache, $data);
+        render(400, '400', $data);
 
     $file = $_FILES['attachment'];
 
@@ -806,13 +805,13 @@ function handleUpload($config, $db)
     } elseif (isset($allowedTypes[$mime])) {
         $ext = $allowedTypes[$mime];
     } else {
-        render(403, '403', $mustache, $data);
+        render(403, '403', $data);
     }
 
     if ($ext === 'ifc') {
         $contents = file_get_contents($file['tmp_name']);
         if (!str_starts_with(trim($contents), 'ISO-10303-21;'))
-            render(400, '400', $mustache, $data);
+            render(400, '400', $data);
     }
 
     $filename = bin2hex(random_bytes(16)) . '.' . $ext;
@@ -822,7 +821,7 @@ function handleUpload($config, $db)
         mkdir($uploadDir, 0755, TRUE);
     }
     if (!move_uploaded_file($file['tmp_name'], $uploadDir . DIRECTORY_SEPARATOR . $filename))
-        render(500, '500', $mustache, $data);
+        render(500, '500', $data);
     return $subdir . '/' . $filename;
 }
 
@@ -929,10 +928,40 @@ function avatar(string $username): string
     return 'avatar-' . $colors[$index];
 }
 
-function render($code, $template, $mustache, $data, $cacheKey = NULL)
+function render_template($template, $data) {
+    $template = preg_replace_callback('/{{#(\w+)}}(.*?){{\/\1}}/s', function($m) use ($data) { // {{#var}}
+        $value = $data[$m[1]] ?? null;
+        if (is_array($value)) {
+            $out = '';
+            foreach ($value as $item) {
+                $newData = is_array($item) ? array_replace($data, $item) : array_replace($data, ['.' => $item]);
+                $out .= render_template($m[2], $newData);
+            }
+            return $out;
+        } elseif ($value) {
+            return render_template($m[2], $data);
+        }
+        return '';
+    }, $template);
+    $template = preg_replace_callback('/{{\^(\w+)}}(.*?){{\/\1}}/s', function($m) use ($data) { // {{^var}}
+        return empty($data[$m[1]]) ? render_template($m[2], $data) : '';
+    }, $template);
+    $template = preg_replace_callback('/{{{(\w+)}}}/', function($m) use ($data) { // {{{var}}}
+        return str_replace(['{{', '}}'], ['&#123;&#123;', '&#125;&#125;'], $data[$m[1]] ?? '');
+    }, $template);
+    $template = preg_replace_callback('/{{(\w+)}}/', function($m) use ($data) { // {{var}}
+        $value = str_replace(['{{', '}}'], ['&#123;&#123;', '&#125;&#125;'], $data[$m[1]] ?? '');
+        return htmlentities($value, ENT_QUOTES, 'UTF-8');
+    }, $template);
+    return $template;
+}
+
+function render($code, $template, $data, $cacheKey = NULL)
 {
     http_response_code($code);
-    $html = $mustache->render($template, $data);
+    $html = render_template(file_get_contents('templates/header.mustache', true), $data);
+    $html .= render_template(file_get_contents('templates/' . $template . '.mustache', true), $data);
+    $html .= render_template(file_get_contents('templates/footer.mustache', true), $data);
     echo $html;
     if ($cacheKey && empty($_SESSION['user_id']))
         saveCache($cacheKey, $html);
@@ -1004,25 +1033,24 @@ class ForumMarkdown extends Parsedown
     }
 }
 
+generateCsrf($data);
 checkSessionToken($baseurl, $db);
 
 $queryString = [];
 if ($method === 'GET' && preg_match('/^(p[0-9]{1,3})?$/', $uri, $queryString)) {
     tryRenderFromCache('index');
-    generateCsrf($data);
     $page = (count($queryString) === 2) ? (int) substr($queryString[1], 1) : 1;
     $data['threads'] = getThreads($db, $page, $perPage);
     $totalPages = ceil(getTotalThreads($db) / $perPage);
     $data['has_pagination'] = $totalPages > 1;
     $data['pages'] = getPaginationPages($page, $totalPages);
-    render(200, 'index', $mustache, $data, 'index');
+    render(200, 'index', $data, 'index');
 } else if ($method === 'GET' && $uri === 'login') {
-    generateCsrf($data);
     $data['iq_question'] = $config['iqQuestion'];
-    render(200, 'login', $mustache, $data);
+    render(200, 'login', $data);
 } else if ($method === 'POST' && $uri === 'login') {
-    checkCsrf($mustache, $data);
-    checkRateLimit($config, $mustache, $data, 'login', 5, 300);
+    checkCsrf($data);
+    checkRateLimit($config, $data, 'login', 5, 300);
     $user = validateLogin($db);
     if ($user !== FALSE) {
         login($db, $user);
@@ -1031,48 +1059,46 @@ if ($method === 'GET' && preg_match('/^(p[0-9]{1,3})?$/', $uri, $queryString)) {
     $data['has_login_error'] = TRUE;
     $data['username'] = isset($_POST['username']) ? $_POST['username'] : '';
     $data['iq_question'] = $config['iqQuestion'];
-    render(400, 'login', $mustache, $data);
+    render(400, 'login', $data);
 } else if ($method === 'POST' && $uri === 'register') {
-    checkCsrf($mustache, $data);
-    checkRateLimit($config, $mustache, $data, 'register', 5, 300);
-    checkCaptcha($mustache, $config);
+    checkCsrf($data);
+    checkRateLimit($config, $data, 'register', 5, 300);
+    checkCaptcha($config);
     $data['errors'] = validateRegistration($config, $db);
     if (count($data['errors']) === 0) {
         $userId = addUser($db);
         $code = generateVerification($db, $userId);
         if (sendVerificationEmail($config, $_POST['email'], $code) === FALSE)
-            render(500, '500', $mustache, $data);
+            render(500, '500', $data);
         $data['is_sent'] = TRUE;
-        render(200, 'verify', $mustache, $data);
+        render(200, 'verify', $data);
     }
     $data['has_register_errors'] = TRUE;
     $data['username'] = isset($_POST['username']) ? $_POST['username'] : '';
     $data['email'] = isset($_POST['email']) ? $_POST['email'] : '';
     $data['answer'] = isset($_POST['answer']) ? $_POST['answer'] : '';
     $data['iq_question'] = $config['iqQuestion'];
-    render(400, 'login', $mustache, $data);
+    render(400, 'login', $data);
 } else if ($method === 'GET' && $uri == 'reset') {
-    generateCsrf($data);
-    render(200, 'reset', $mustache, $data);
+    render(200, 'reset', $data);
 } else if ($method === 'POST' && $uri == 'reset') {
-    checkCsrf($mustache, $data);
-    checkRateLimit($config, $mustache, $data, 'verify', 3, 300);
+    checkCsrf($data);
+    checkRateLimit($config, $data, 'verify', 3, 300);
     $user = getUserByEmail($db, empty($_POST['email']) ? '' : $_POST['email']);
     if ($user) {
         $code = generateVerification($db, $user['id']);
         if (sendResetEmail($config, $user['email'], $code) === FALSE)
-            render(500, '500', $mustache, $data);
+            render(500, '500', $data);
     }
     $data['is_sent'] = TRUE;
-    render(200, 'reset', $mustache, $data);
+    render(200, 'reset', $data);
 } else if ($method === 'GET' && preg_match('/^reset\/([A-Za-z0-9]{1,100})$/', $uri, $queryString)) {
-    generateCsrf($data);
     $data['code'] = $queryString[1];
     $data['is_valid_code'] = (bool) checkVerificationCode($db, $queryString[1]);
-    render(200, 'reset', $mustache, $data);
+    render(200, 'reset', $data);
 } else if ($method === 'POST' && preg_match('/^reset\/([A-Za-z0-9]{1,100})$/', $uri, $queryString)) {
-    checkCsrf($mustache, $data);
-    checkRateLimit($config, $mustache, $data, 'reset', 3, 300);
+    checkCsrf($data);
+    checkRateLimit($config, $data, 'reset', 3, 300);
     $data['code'] = $queryString[1];
     $userId = checkVerificationCode($db, $queryString[1]);
     $data['is_valid_code'] = (bool) $userId;
@@ -1084,46 +1110,43 @@ if ($method === 'GET' && preg_match('/^(p[0-9]{1,3})?$/', $uri, $queryString)) {
             $data['is_success'] = TRUE;
         }
     }
-    render(200, 'reset', $mustache, $data);
+    render(200, 'reset', $data);
 } else if ($method === 'GET' && $uri == 'verify') {
-    generateCsrf($data);
-    render(200, 'verify', $mustache, $data);
+    render(200, 'verify', $data);
 } else if ($method === 'POST' && $uri == 'verify') {
-    checkCsrf($mustache, $data);
-    checkRateLimit($config, $mustache, $data, 'verify', 3, 300);
-    checkCaptcha($mustache, $config);
+    checkCsrf($data);
+    checkRateLimit($config, $data, 'verify', 3, 300);
+    checkCaptcha($config);
     $user = getUserByEmail($db, empty($_POST['email']) ? '' : $_POST['email']);
     if ($user) {
         $code = generateVerification($db, $user['id']);
         if (sendVerificationEmail($config, $user['email'], $code) === FALSE)
-            render(500, '500', $mustache, $data);
+            render(500, '500', $data);
     }
     $data['is_sent'] = TRUE;
-    render(200, 'verify', $mustache, $data);
+    render(200, 'verify', $data);
 } else if ($method === 'GET' && preg_match('/^verify\/([A-Za-z0-9]{1,100})$/', $uri, $queryString)) {
-    generateCsrf($data);
     $data['code'] = $queryString[1];
     $data['is_success'] = verifyUser($db, $queryString[1]);
-    render(200, 'verify', $mustache, $data);
+    render(200, 'verify', $data);
 } else if ($method === 'POST' && $uri === 'logout') {
-    checkCsrf($mustache, $data);
+    checkCsrf($data);
     logout();
     redirect($baseurl);
 } else if ($method === 'GET' && $uri === 'post') {
     if (!$data['is_logged_in'])
         redirect($baseurl . 'login');
-    generateCsrf($data);
-    render(200, 'post', $mustache, $data);
+    render(200, 'post', $data);
 } else if ($method === 'POST' && $uri === 'post') {
     if (!$data['is_logged_in'])
         redirect($baseurl . 'login');
-    checkCsrf($mustache, $data);
-    checkRateLimit($config, $mustache, $data, 'post', 5, 10);
+    checkCsrf($data);
+    checkRateLimit($config, $data, 'post', 5, 10);
     $data['errors'] = [];
     validateThread($config, $baseurl, $data['errors']);
     validatePost($config, $baseurl, $data['errors']);
     if (count($data['errors']) === 0) {
-        checkRateLimit($config, $mustache, $data, 'post-success', 5, 300);
+        checkRateLimit($config, $data, 'post-success', 5, 300);
         $threadId = addThread($db);
         addPost($db, $threadId);
         sendNotificationEmails($config, $db, $threadId);
@@ -1133,7 +1156,7 @@ if ($method === 'GET' && preg_match('/^(p[0-9]{1,3})?$/', $uri, $queryString)) {
     $data['has_error'] = TRUE;
     $data['title'] = $_POST['title'];
     $data['content'] = $_POST['content'];
-    render(400, 'post', $mustache, $data);
+    render(400, 'post', $data);
 } else if ($method === 'GET' && preg_match('/^thread\/([0-9]{1,50})\/latest$/', $uri, $queryString)) {
     $threadId = (int) $queryString[1];
     $totalPages = ceil(getTotalPosts($db, $threadId) / $perPage);
@@ -1143,7 +1166,7 @@ if ($method === 'GET' && preg_match('/^(p[0-9]{1,3})?$/', $uri, $queryString)) {
     $threadId = (int) $queryString[1];
     $cacheKey = 'thread/' . $threadId . '/p' . $page;
     tryRenderFromCache($cacheKey);
-    getThread($config, $mustache, $db, $threadId, $page, $perPage, $data);
+    getThread($config, $db, $threadId, $page, $perPage, $data);
     $totalPages = ceil(getTotalPosts($db, $threadId) / $perPage);
     $data['page'] = $page;
     $data['has_pagination'] = $totalPages > 1;
@@ -1154,18 +1177,17 @@ if ($method === 'GET' && preg_match('/^(p[0-9]{1,3})?$/', $uri, $queryString)) {
     }
     $data['id'] = $threadId;
     $data['html_title'] = $data['title'];
-    generateCsrf($data);
-    render(200, 'thread', $mustache, $data, $cacheKey);
+    render(200, 'thread', $data, $cacheKey);
 } else if ($method === 'POST' && preg_match('/^thread\/([0-9]{1,50})(\/(p[0-9]{1,3})?)?$/', $uri, $queryString)) {
     if (!$data['is_logged_in'])
         redirect($baseurl . 'login');
-    checkCsrf($mustache, $data);
+    checkCsrf($data);
     $page = (count($queryString) === 4) ? (int) substr($queryString[3], 1) : 1;
     $threadId = (int) $queryString[1];
     $data['errors'] = [];
     validatePost($config, $baseurl, $data['errors']);
     if (count($data['errors']) === 0) {
-        checkRateLimit($config, $mustache, $data, 'post-success', 5, 300);
+        checkRateLimit($config, $data, 'post-success', 5, 300);
         $postId = addPost($db, $threadId);
         sendNotificationEmails($config, $db, $threadId);
         $totalPages = ceil(getTotalPosts($db, $threadId) / $perPage);
@@ -1173,67 +1195,64 @@ if ($method === 'GET' && preg_match('/^(p[0-9]{1,3})?$/', $uri, $queryString)) {
         redirect($baseurl . 'thread/' . $threadId . '/p' . $totalPages . '#' . $postId);
     }
     $data['has_error'] = TRUE;
-    getThread($config, $mustache, $db, $threadId, $page, $perPage, $data);
+    getThread($config, $db, $threadId, $page, $perPage, $data);
     $data['id'] = $threadId;
     $totalPages = ceil(getTotalPosts($db, $threadId) / $perPage);
     $data['page'] = $page;
     $data['has_pagination'] = $totalPages > 1;
     $data['pages'] = getPaginationPages($page, $totalPages);
     $data['html_title'] = $data['title'];
-    render(400, 'thread', $mustache, $data, $cacheKey);
+    render(400, 'thread', $data, $cacheKey);
 } else if (in_array($method, ['GET', 'POST']) && preg_match('/^thread\/edit\/([0-9]{1,100})$/', $uri, $queryString)) {
     if (!$data['is_logged_in'])
         redirect($baseurl . 'login');
     $threadId = (int) $queryString[1];
-    $thread = getThread($config, $mustache, $db, $threadId, 1, 1, $data);
+    $thread = getThread($config, $db, $threadId, 1, 1, $data);
     $data['id'] = $threadId;
-    if ($method === 'GET') {
-        generateCsrf($data);
-        render(200, 'threadedit', $mustache, $data);
-    }
+    if ($method === 'GET')
+        render(200, 'threadedit', $data);
     $data['title'] = $_POST['title'];
     $data['errors'] = [];
-    checkCsrf($mustache, $data);
+    checkCsrf($data);
     validateThread($config, $baseurl, $data['errors']);
     if (count($data['errors']) === 0) {
-        checkRateLimit($config, $mustache, $data, 'threadedit', 5, 300);
+        checkRateLimit($config, $data, 'threadedit', 5, 300);
         updateThread($db, $threadId);
         invalidateCache(['index', 'thread/' . $threadId . '/p']);
         redirect($baseurl . 'thread/' . $threadId);
     }
     $data['has_error'] = TRUE;
-    render(400, 'threadedit', $mustache, $data);
+    render(400, 'threadedit', $data);
 } else if (in_array($method, ['GET', 'POST']) && preg_match('/^post\/edit\/([0-9]{1,100})$/', $uri, $queryString)) {
     if (!$data['is_logged_in'])
         redirect($baseurl . 'login');
     $postId = (int) $queryString[1];
     $post = getPost($config, $db, $postId);
     if (!$post)
-        return render(404, '404', $mustache, $data);
+        return render(404, '404', $data);
     $data['id'] = $postId;
     $data['can_move'] = in_array($_SESSION['username'], $config['adminUsernames']);
     if ($method === 'GET') {
-        generateCsrf($data);
         $data['content'] = $post['content'];
-        render(200, 'postedit', $mustache, $data);
+        render(200, 'postedit', $data);
     }
     $data['content'] = $_POST['content'];
     $data['errors'] = [];
-    checkCsrf($mustache, $data);
+    checkCsrf($data);
     validatePost($config, $baseurl, $data['errors']);
     if (count($data['errors']) === 0) {
-        checkRateLimit($config, $mustache, $data, 'postedit', 5, 300);
+        checkRateLimit($config, $data, 'postedit', 5, 300);
         updatePost($db, $postId);
         invalidateCache(['thread/' . $post['thread_id'] . '/p']);
         redirect($baseurl . 'thread/' . $post['thread_id']);
     }
     $data['has_error'] = TRUE;
-    render(400, 'postedit', $mustache, $data);
+    render(400, 'postedit', $data);
 } else if ($method === 'POST' && preg_match('/^thread\/delete\/([0-9]{1,100})$/', $uri, $queryString)) {
     if (!$data['is_logged_in'])
         redirect($baseurl . 'login');
-    checkCsrf($mustache, $data);
-    checkRateLimit($config, $mustache, $data, 'threaddelete', 5, 300);
+    checkCsrf($data);
+    checkRateLimit($config, $data, 'threaddelete', 5, 300);
     $threadId = (int) $queryString[1];
     deleteThread($config, $db, $threadId);
     invalidateCache(['index', 'thread/' . $threadId . '/p']);
@@ -1241,8 +1260,8 @@ if ($method === 'GET' && preg_match('/^(p[0-9]{1,3})?$/', $uri, $queryString)) {
 } else if ($method === 'POST' && preg_match('/^post\/delete\/([0-9]{1,100})$/', $uri, $queryString)) {
     if (!$data['is_logged_in'])
         redirect($baseurl . 'login');
-    checkCsrf($mustache, $data);
-    checkRateLimit($config, $mustache, $data, 'postdelete', 5, 300);
+    checkCsrf($data);
+    checkRateLimit($config, $data, 'postdelete', 5, 300);
     $postId = (int) $queryString[1];
     $threadId = getThreadId($db, $postId);
     deletePost($config, $db, $postId);
@@ -1251,7 +1270,7 @@ if ($method === 'GET' && preg_match('/^(p[0-9]{1,3})?$/', $uri, $queryString)) {
 } else if ($method === 'POST' && preg_match('/^post\/move\/([0-9]{1,100})$/', $uri, $queryString)) {
     if (!$data['is_logged_in'] || !in_array($_SESSION['username'], $config['adminUsernames']))
         redirect($baseurl . 'login');
-    checkCsrf($mustache, $data);
+    checkCsrf($data);
     $postId = (int) $queryString[1];
     $oldThreadId = getThreadId($db, $postId);
     $newThreadId = (int) $_POST['thread_id'];
@@ -1261,16 +1280,15 @@ if ($method === 'GET' && preg_match('/^(p[0-9]{1,3})?$/', $uri, $queryString)) {
 } else if ($method === 'GET' && $uri == 'upload') {
     if (!$data['is_logged_in'])
         redirect($baseurl . 'login');
-    generateCsrf($data);
-    render(200, 'upload', $mustache, $data);
+    render(200, 'upload', $data);
 } else if ($method === 'POST' && $uri == 'upload') {
     if (!$data['is_logged_in'])
         redirect($baseurl . 'login');
-    checkCsrf($mustache, $data);
-    checkRateLimit($config, $mustache, $data, 'upload', 10, 300);
+    checkCsrf($data);
+    checkRateLimit($config, $data, 'upload', 10, 300);
     $data['filename'] = handleUpload($config, $db);
     if (!isset($_POST['useJS']))
-        render(200, 'upload', $mustache, $data);
+        render(200, 'upload', $data);
     http_response_code(201);
     header('Content-Type: application/json');
     echo json_encode(['success' => true, 'url' => $baseurl . 'files/' . $data['filename'], 'csrf' => $data['csrf']]);
@@ -1278,7 +1296,7 @@ if ($method === 'GET' && preg_match('/^(p[0-9]{1,3})?$/', $uri, $queryString)) {
 } else if ($method === 'POST' && $uri === 'vote') {
     if (!$data['is_logged_in'])
         redirect($baseurl . 'login');
-    checkCsrf($mustache, $data);
+    checkCsrf($data);
     $postId = isset($_POST['post_id']) ? (int) $_POST['post_id'] : 0;
     $query = $db->prepare('SELECT id FROM posts WHERE id = :id AND user_id != :user_id LIMIT 1');
     $query->bindValue(':user_id', $_SESSION['user_id']);
@@ -1328,9 +1346,9 @@ if ($method === 'GET' && preg_match('/^(p[0-9]{1,3})?$/', $uri, $queryString)) {
     $query->bindValue(':id', $_SESSION['user_id'], PDO::PARAM_INT);
     $query->execute();
     $data['is_on'] = (bool) $query->fetchColumn();
-    render(200, 'notifications', $mustache, $data);
+    render(200, 'notifications', $data);
 } else if ($method === 'GET' && str_starts_with($uri, 'search')) {
     redirect('https://duckduckgo.com/?q=' . urlencode('site:' . $baseurl . ' ' . trim($_GET['q'] ?? '')));
 } else {
-    render(404, '404', $mustache, $data);
+    render(404, '404', $data);
 }

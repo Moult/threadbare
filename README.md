@@ -27,7 +27,7 @@ Features:
  - Threads! Posts! Add, edit, delete.
  - Kudos +1 or -1 on posts.
  - Coloured automatic avatar without images (unless you really want 25 extra HTTP requests to Gravatar on the homepage with leaked email hashes, eh?).
- - Decoupled UI with mustache. Have whatever theme you want I guess?
+ - Decoupled UI. Have whatever theme you want I guess?
  - File uploads.
  - Live post preview.
  - Auto embed video links. Lazy load images.
@@ -45,8 +45,7 @@ Features:
 
 Your PHP needs:
 
- - curl (for hCaptcha)
- - gmp (for SendGrid)
+ - curl (for hCaptcha and SendGrid)
  - SQLite (for database)
  - apcu\_cache (for cache)
 
