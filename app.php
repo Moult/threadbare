@@ -253,40 +253,48 @@ function generateVerification($db, $userId)
     return $code;
 }
 
+function sendEmail($config, $to, $subject, $content)
+{
+    try {
+        $ch = curl_init();
+        curl_setopt($ch, CURLOPT_URL, 'https://api.sendgrid.com/v3/mail/send');
+        curl_setopt($ch, CURLOPT_RETURNTRANSFER, true);
+        curl_setopt($ch, CURLOPT_CUSTOMREQUEST, 'POST');
+        curl_setopt($ch, CURLOPT_HTTPHEADER, [
+            'Authorization: Bearer ' . $config['sendGridKey'], 'Content-Type: application/json'
+        ]);
+        $data = [
+            "personalizations" => $to,
+            "from" => ["email" => $config['emailFrom'], "name" => $config['websiteTitle']],
+            "reply_to" => ["email" => $config['emailFrom'], "name" => $config['websiteTitle']],
+            "subject" => $subject,
+            "content" => [["type" => "text/plain", "value" => $content]]
+        ];
+        curl_setopt($ch, CURLOPT_POSTFIELDS, json_encode($data));
+        $response = curl_exec($ch);
+        curl_close($ch);
+        return (curl_getinfo($ch, CURLINFO_HTTP_CODE) === 202);
+    } catch (Exception $e) {
+        return FALSE;
+    }
+}
+
 function sendVerificationEmail($config, $email, $code)
 {
     $email = filter_var($email, FILTER_SANITIZE_EMAIL);
     $url = $config['baseurl'] . 'verify/' . $code;
-    $plain = "Welcome to the forums!\n\nYou've just registered a new account. If this wasn't you, ignore this email. Click this link to verify your account:\n\n" . $url;
-    $message = new \SendGrid\Mail\Mail();
-    $message->setFrom($config['emailFrom'], $config['websiteTitle']);
-    $message->setSubject('Verify your ' . $config['websiteTitle'] . ' Account');
-    $message->addTo($email);
-    $message->addContent('text/plain', $plain);
-    $sendgrid = new \SendGrid($config['sendGridKey']);
-    try {
-        $sendgrid->send($message);
-    } catch (Exception $e) {
-        return FALSE;
-    }
+    $content = "Welcome to the forums!\n\nYou've just registered a new account. If this wasn't you, ignore this email. Click this link to verify your account:\n\n" . $url;
+    $to = [["to" => [["email" => $email]]]];
+    return sendEmail($config, $to, 'Verify your ' . $config['websiteTitle'] . ' Account', $content);
 }
 
 function sendResetEmail($config, $email, $code)
 {
     $email = filter_var($email, FILTER_SANITIZE_EMAIL);
     $url = $config['baseurl'] . 'reset/' . $code;
-    $plain = "To reset your password, click the link below. If this wasn't you, ignore this email.\n\n" . $url;
-    $message = new \SendGrid\Mail\Mail();
-    $message->setFrom($config['emailFrom'], $config['websiteTitle']);
-    $message->setSubject('Reset ' . $config['websiteTitle'] . ' Password');
-    $message->addTo($email);
-    $message->addContent('text/plain', $plain);
-    $sendgrid = new \SendGrid($config['sendGridKey']);
-    try {
-        $sendgrid->send($message);
-    } catch (Exception $e) {
-        return FALSE;
-    }
+    $content = "To reset your password, click the link below. If this wasn't you, ignore this email.\n\n" . $url;
+    $to = [["to" => [["email" => $email]]]];
+    return sendEmail($config, $to, 'Reset ' . $config['websiteTitle'] . ' Password', $content);
 }
 
 function sendNotificationEmails($config, $db, $threadId)
@@ -337,26 +345,14 @@ function sendNotificationEmails($config, $db, $threadId)
     $url2 = $config['baseurl'] . 'notifications';
     $title = preg_replace('/[\x00-\x1F\x7F]/u', '', $title);
     $username = preg_replace('/[\x00-\x1F\x7F]/u', '', $_SESSION['username']);
-    $plain = $username . ' has posted on the thread "' . $title . '". Check it out!' . "\n\n" . $url;
-    $plain .= "\n\n" . "If you don't want notifications, sign in then visit this page:" . "\n\n" . $url2;
-    $message = new \SendGrid\Mail\Mail();
-    $message->setFrom($config['emailFrom'], $config['websiteTitle']);
-    $message->setSubject('[' . $config['websiteTitle'] . '] ' . $_SESSION['username'] . ' commented on ' . $title);
-    $message->addTo($config['emailFrom']);
-
+    $content = $username . ' has posted on the thread "' . $title . '". Check it out!' . "\n\n" . $url;
+    $content .= "\n\n" . "If you don't want notifications, sign in then visit this page:" . "\n\n" . $url2;
+    $subject = '[' . $config['websiteTitle'] . '] ' . $_SESSION['username'] . ' commented on ' . $title;
+    $to = [];
     foreach (array_unique($emails) as $email) {
-        $personalization = new \SendGrid\Mail\Personalization();
-        $personalization->addTo(new \SendGrid\Mail\To($email));
-        $message->addPersonalization($personalization);
+        $to[] = ["to" => [["email" => $email]]];
     }
-
-    $message->addContent('text/plain', $plain);
-    $sendgrid = new \SendGrid($config['sendGridKey']);
-    try {
-        $sendgrid->send($message);
-    } catch (Exception $e) {
-        return FALSE;
-    }
+    return sendEmail($config, $to, $subject, $content);
 }
 
 function checkVerificationCode($db, $code)
