@@ -4,5 +4,4 @@
 !uploads/.gitkeep
 uploads/*
 config.php
-vendor/*
 tmp/*

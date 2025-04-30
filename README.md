@@ -49,10 +49,9 @@ Your PHP needs:
  - SQLite (for database)
  - apcu\_cache (for cache)
 
-Set up dependencies, database, and website URL:
+Set up database and configuration:
 
 ```
-$ composer install
 $ sqlite3 threadbare.db < db.sql
 $ cp config.php.template config.php
 $ vim config.php # Add your API keys and set website URL
