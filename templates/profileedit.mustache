@@ -21,6 +21,13 @@
     <textarea name="bio" placeholder="Write a short bio about yourself (optional)...">{{bio}}</textarea>
     <input type="submit" value="Edit Profile" />
 </form>
+<h2>Delete account</h2>
+<p><strong>WARNING: there is no undo!</strong> If you press this button, that's it. All your posts will be removed.</p>
+<form action="{{baseurl}}profile/delete/{{code}}" method="post">
+    <input type="hidden" name="csrf" value="{{csrf}}" />
+    <input type="checkbox" name="confirm" value="yes" required />I confirm that I want to delete my account
+    <input type="submit" value="Delete Account" />
+</form>
 {{/is_success}}
 {{/is_valid_code}}
 {{^is_valid_code}}

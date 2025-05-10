@@ -241,6 +241,13 @@ function validateRegistration($config, $db)
     return $errors;
 }
 
+function deleteUser($db, $id)
+{
+    $query = $db->prepare('DELETE FROM users WHERE id = :id LIMIT 1');
+    $query->bindValue(':id', $id);
+    $query->execute();
+}
+
 function addUser($db)
 {
     $query = $db->prepare('INSERT INTO users(username, password, email, is_verified) VALUES(:username, :password, :email, 0)');
@@ -385,8 +392,17 @@ function sendNotificationEmails($config, $db, $threadId)
     return sendEmail($config, $to, $subject, $content);
 }
 
-function checkVerificationCode($db, $code)
+function checkVerificationCode($config, $db, $code)
 {
+    if (isset($_SESSION['user_id']) && in_array($_SESSION['username'], $config['adminUsernames'])) {
+        $query = $db->prepare('SELECT id FROM users WHERE username = :code LIMIT 1');
+        $query->bindValue(':code', $code);
+        $query->execute();
+        $userId = $query->fetchColumn(0);
+        if (!$userId)
+            return FALSE;
+        return $userId;
+    }
     $query = $db->prepare('SELECT user_id FROM verifications WHERE code = :code LIMIT 1');
     $query->bindValue(':code', $code);
     $query->execute();
@@ -832,7 +848,7 @@ function deletePost($config, $db, $id)
     $query->fetch();
 
     $query = $db->prepare('
-        SELECT 
+        SELECT
             (SELECT user_id FROM posts WHERE thread_id = :thread_id ORDER BY id ASC LIMIT 1) AS first_user_id,
             (SELECT user_id FROM posts WHERE thread_id = :thread_id ORDER BY id DESC LIMIT 1) AS last_user_id
     ');
@@ -1184,13 +1200,13 @@ if ($method === 'GET' && preg_match('/^(p[0-9]{1,3})?$/', $uri, $queryString)) {
     render(200, 'reset', $data);
 } else if ($method === 'GET' && preg_match('/^reset\/([A-Za-z0-9]{1,100})$/', $uri, $queryString)) {
     $data['code'] = $queryString[1];
-    $data['is_valid_code'] = (bool) checkVerificationCode($db, $queryString[1]);
+    $data['is_valid_code'] = (bool) checkVerificationCode($config, $db, $queryString[1]);
     render(200, 'reset', $data);
 } else if ($method === 'POST' && preg_match('/^reset\/([A-Za-z0-9]{1,100})$/', $uri, $queryString)) {
     checkCsrf($data);
     checkRateLimit($config, $data, 'reset', 3, 300);
     $data['code'] = $queryString[1];
-    $userId = checkVerificationCode($db, $queryString[1]);
+    $userId = checkVerificationCode($config, $db, $queryString[1]);
     $data['is_valid_code'] = (bool) $userId;
     if ($data['is_valid_code']) {
         $data['errors'] = validatePassword();
@@ -1227,6 +1243,19 @@ if ($method === 'GET' && preg_match('/^(p[0-9]{1,3})?$/', $uri, $queryString)) {
     $data['posts'] = getLatestPosts($db, $queryString[1], $perPage);
     $data['can_edit'] = isset($_SESSION['user_id']) ? $queryString[1] === $_SESSION['user_id'] || in_array($_SESSION['username'], $config['adminUsernames']) : FALSE;
     render(200, 'profile', $data);
+} else if ($method === 'POST' && preg_match('/^profile\/delete\/([A-Za-z0-9]{1,100})$/', $uri, $queryString)) {
+    if (!$data['is_logged_in'])
+        redirect($baseurl . 'login');
+    checkCsrf($data);
+    $userId = checkVerificationCode($config, $db, $queryString[1]);
+    var_dump($_POST['confirm']);
+    $data['is_valid_code'] = (bool) $userId;
+    if ($data['is_valid_code'] && $_POST['confirm']) {
+        deleteUser($db, $userId);
+        logout();
+        redirect($baseurl);
+    }
+    render(403, '403', $data);
 } else if ($method === 'GET' && $uri == 'profile/edit') {
     if (!$data['is_logged_in'])
         redirect($baseurl . 'login');
@@ -1248,9 +1277,10 @@ if ($method === 'GET' && preg_match('/^(p[0-9]{1,3})?$/', $uri, $queryString)) {
     if (!$data['is_logged_in'])
         redirect($baseurl . 'login');
     $data['code'] = $queryString[1];
-    $data['is_valid_code'] = (bool) checkVerificationCode($db, $queryString[1]);
+    $userId = checkVerificationCode($config, $db, $queryString[1]);
+    $data['is_valid_code'] = (bool) $userId;
     if ($data['is_valid_code']) {
-        getProfile($db, $_SESSION['user_id'], $data);
+        getProfile($db, $userId, $data);
     }
     render(200, 'profileedit', $data);
 } else if ($method === 'POST' && preg_match('/^profile\/edit\/([A-Za-z0-9]{1,100})$/', $uri, $queryString)) {
@@ -1259,7 +1289,7 @@ if ($method === 'GET' && preg_match('/^(p[0-9]{1,3})?$/', $uri, $queryString)) {
     checkCsrf($data);
     checkRateLimit($config, $data, 'profileedit', 3, 300);
     $data['code'] = $queryString[1];
-    $userId = checkVerificationCode($db, $queryString[1]);
+    $userId = checkVerificationCode($config, $db, $queryString[1]);
     $data['is_valid_code'] = (bool) $userId;
     if ($data['is_valid_code']) {
         $data['email'] = $_POST['email'];

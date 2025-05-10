@@ -168,6 +168,10 @@ textarea, input, .button {
     width: calc(100% - 12px - 12px - 1px - 1px);
     margin-top: 10px;
 }
+input[type="checkbox"] {
+    width: auto;
+    margin: 10px;
+}
 input[type="submit"], .button {
     background-color: #e14658;
     color: #fff;
