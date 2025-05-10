@@ -1,12 +1,12 @@
 <h2>Edit thread</h2>
-{{#has_error}}
+{{#has_errors}}
 <p><strong>Uh oh</strong>. Your thread title has issues:</p>
 <ul class="errors">
 {{#errors}}
     <li>{{.}}</li>
 {{/errors}}
 </ul>
-{{/has_error}}
+{{/has_errors}}
 <form action="{{baseurl}}thread/edit/{{id}}" method="post">
     <input type="hidden" name="csrf" value="{{csrf}}" />
     <label for="title">Title</label>

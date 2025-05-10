@@ -1,12 +1,12 @@
 <h2>New Post</h2>
-{{#has_error}}
+{{#has_errors}}
 <p><strong>Uh oh</strong>. Your post has issues:</p>
 <ul class="errors">
 {{#errors}}
     <li>{{.}}</li>
 {{/errors}}
 </ul>
-{{/has_error}}
+{{/has_errors}}
 <form action="{{baseurl}}post" method="post">
     <input type="hidden" name="csrf" value="{{csrf}}" />
     <label for="title">Title</label>

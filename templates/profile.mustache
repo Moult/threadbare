@@ -1,0 +1,19 @@
+<h2>{{profile_username}}'s Profile</h2>
+
+{{#can_edit}}
+<p><a href="{{baseurl}}profile/edit">Edit profile</a></p>
+{{/can_edit}}
+
+{{{bio}}}
+
+<h3>Latest post activity</h3>
+
+<ol class="threads">
+{{#posts}}
+    <li class="thread">
+        <span class="avatar {{avatar}}">{{initial}}</span>
+        <span class="thread-title"><a href="{{baseurl}}thread/{{id}}/latest">{{title}}</a></span><br>
+        <span class="metadata">Thread started by <a href="{{baseurl}}profile/{{user_id}}">{{username}}</a>, posted {{ts_updated}}</span>
+    </li>
+{{/posts}}
+</ol>

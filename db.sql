@@ -6,6 +6,7 @@ CREATE TABLE "users" (
 	"is_verified"	INTEGER NOT NULL,
 	"notifications"	INTEGER NOT NULL DEFAULT 1,
 	"session_token"	TEXT,
+	"bio"	TEXT,
 	PRIMARY KEY("id" AUTOINCREMENT)
 );
 

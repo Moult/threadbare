@@ -8,7 +8,7 @@
         <a id="{{id}}"></a>
         <span class="avatar {{avatar}}">{{initial}}</span>
         <span class="metadata">
-            by <strong>{{username}}</strong> on <strong>{{ts_created}}</strong>{{#ts_updated}}, edited <strong>{{ts_updated}}</strong>{{/ts_updated}}
+            by <a href="{{baseurl}}profile/{{user_id}}">{{username}}</a> on <strong>{{ts_created}}</strong>{{#ts_updated}}, edited <strong>{{ts_updated}}</strong>{{/ts_updated}}
             <a href="{{baseurl}}thread/{{thread_id}}/p{{page}}#{{id}}">#</a>
             {{#can_edit}}
             <a href="{{baseurl}}post/edit/{{id}}">edit</a>
@@ -50,14 +50,14 @@
 {{#is_logged_in}}
 <p>Posts can be formatted using <a href="https://en.wikipedia.org/wiki/Markdown">Markdown</a>.</p>
 <p><a href="{{baseurl}}upload" id="upload-link">Attach file?</a> <small>(images, txt, zip, pdf, and ifc)</small></p>
-{{#has_error}}
+{{#has_errors}}
 <p><strong>Uh oh</strong>. Your post has issues:</p>
 <ul class="errors">
 {{#errors}}
     <li>{{.}}</li>
 {{/errors}}
 </ul>
-{{/has_error}}
+{{/has_errors}}
 <form action="" method="post">
     <input type="hidden" name="csrf" value="{{csrf}}" />
     <textarea name="content" id="content"></textarea>

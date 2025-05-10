@@ -7,7 +7,7 @@
     <li class="thread{{#is_unread}} unread{{/is_unread}}">
         <span class="avatar {{avatar}}">{{initial}}</span>
         <span class="thread-title"><a href="{{baseurl}}thread/{{id}}/p{{last_page}}">{{title}}</a></span>{{#is_unread}}<small> (New)</small>{{/is_unread}}<br>
-        <span class="metadata">by <strong>{{username}}</strong>, <strong>{{views}}</strong> views, <strong>{{total_posts}}</strong> replies, most recent by <strong>{{last_username}}</strong> {{ts_updated}}</span>
+        <span class="metadata">by <a href="{{baseurl}}profile/{{user_id}}">{{username}}</a>, <strong>{{views}}</strong> views, <strong>{{total_posts}}</strong> replies, most recent by <a href="{{baseurl}}profile/{{last_user_id}}">{{last_username}}</a> {{ts_updated}}</span>
     </li>
     {{/threads}}
 </ol>
