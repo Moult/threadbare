@@ -1038,7 +1038,7 @@ function render_template($template, $data) {
     $template = preg_replace_callback('/{{{(\w+)}}}/', function($m) use ($data) { // {{{var}}}
         return str_replace(['{{', '}}'], ['&#123;&#123;', '&#125;&#125;'], $data[$m[1]] ?? '');
     }, $template);
-    $template = preg_replace_callback('/{{(\w+)}}/', function($m) use ($data) { // {{var}}
+    $template = preg_replace_callback('/{{(\w+|.)}}/', function($m) use ($data) { // {{var}}
         $value = str_replace(['{{', '}}'], ['&#123;&#123;', '&#125;&#125;'], $data[$m[1]] ?? '');
         return htmlentities($value, ENT_QUOTES, 'UTF-8');
     }, $template);
