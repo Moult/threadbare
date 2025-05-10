@@ -1172,7 +1172,8 @@ if ($method === 'GET' && preg_match('/^(p[0-9]{1,3})?$/', $uri, $queryString)) {
     render(200, 'reset', $data);
 } else if ($method === 'POST' && $uri == 'reset') {
     checkCsrf($data);
-    checkRateLimit($config, $data, 'verify', 3, 300);
+    checkRateLimit($config, $data, 'reset', 3, 300);
+    checkCaptcha($config);
     $user = getUserByEmail($db, empty($_POST['email']) ? '' : $_POST['email']);
     if ($user) {
         $code = generateVerification($db, $user['id']);
