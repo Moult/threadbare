@@ -479,8 +479,9 @@ function movePost($db, $id, $threadId)
 
 function updateThread($db, $id)
 {
-    $query = $db->prepare('UPDATE threads SET title = :title WHERE id = :id');
+    $query = $db->prepare('UPDATE threads SET title = :title, tags = :tags WHERE id = :id');
     $query->bindValue(':title', $_POST['title']);
+    $query->bindValue(':tags', isset($_POST['tags']) ? implode(",", $_POST['tags']) : '');
     $query->bindValue(':id', $id);
     $query->execute();
 }
@@ -514,6 +515,14 @@ function validateThread($config, $baseurl, &$errors)
             $errors[] = 'Thread title looks spamlike. Please reach out for help in the live chat.';
         }
     }
+    if (isset($_POST['tags'])) {
+        foreach ($_POST['tags'] as $tag) {
+            if (!in_array($tag, $config['tags'])) {
+                $errors[] = 'Tag is invalid.';
+                break;
+            }
+        }
+    }
 }
 
 function validatePost($config, $baseurl, &$errors)
@@ -527,11 +536,12 @@ function validatePost($config, $baseurl, &$errors)
 
 function addThread($db)
 {
-    $query = $db->prepare('INSERT INTO threads(title, user_id, ts_created, ts_updated) VALUES(:title, :user_id, :ts_created, :ts_updated)');
+    $query = $db->prepare('INSERT INTO threads(title, user_id, ts_created, ts_updated, tags) VALUES(:title, :user_id, :ts_created, :ts_updated, :tags)');
     $query->bindValue(':title', $_POST['title']);
     $query->bindValue(':user_id', $_SESSION['user_id']);
     $query->bindValue(':ts_created', time());
     $query->bindValue(':ts_updated', time());
+    $query->bindValue(':tags', isset($_POST['tags']) ? implode(",", $_POST['tags']) : '');
     $query->execute();
     return $db->lastInsertId();
 }
@@ -631,19 +641,23 @@ function getProfile($db, $id, &$data)
     $data['bio'] = $row[2] ?? '';
 }
 
-function getThreads($db, $page = 1, $perPage = 20)
+function getThreads($db, $page = 1, $perPage = 20, $tag = NULL)
 {
     $results = [];
-    $query = $db->prepare('
-        SELECT t.id, t.title, t.views, r.last_read_at, t.user_id, u.username, t.last_user_id, lu.username AS last_username, u.email, t.ts_created, t.ts_updated, count(p.id) AS total_posts
+    $sql = 'SELECT t.id, t.title, t.views, r.last_read_at, t.user_id, u.username, t.last_user_id, lu.username AS last_username, u.email, t.ts_created, t.ts_updated, count(p.id) AS total_posts, t.tags
         FROM threads AS t
         LEFT JOIN users AS u ON t.user_id = u.id
         LEFT JOIN users AS lu ON t.last_user_id = lu.id
         LEFT JOIN posts AS p ON p.thread_id = t.id
-        LEFT JOIN thread_reads AS r ON r.thread_id = t.id AND r.user_id = :user_id
-        GROUP BY t.id ORDER BY t.ts_updated DESC
-        LIMIT :limit OFFSET :offset
-    ');
+        LEFT JOIN thread_reads AS r ON r.thread_id = t.id AND r.user_id = :user_id';
+    if ($tag !== NULL) {
+        $sql .= ' WHERE t.tags LIKE :tag';
+    }
+    $sql .= ' GROUP BY t.id ORDER BY t.ts_updated DESC LIMIT :limit OFFSET :offset';
+    $query = $db->prepare($sql);
+    if ($tag !== NULL) {
+        $query->bindValue(':tag', '%' . $tag . '%', PDO::PARAM_STR);
+    }
     $query->bindValue(':limit', $perPage, PDO::PARAM_INT);
     $query->bindValue(':offset', ($page - 1) * $perPage, PDO::PARAM_INT);
     if (isset($_SESSION['username'])) {
@@ -667,14 +681,20 @@ function getThreads($db, $page = 1, $perPage = 20)
             'ts_updated' => timeAgo($row['ts_updated']),
             'avatar' => avatar($row['username']),
             'initial' => strtoupper($row['username'][0]),
+            'tags' => implode(', ', explode(',', $row['tags'])),
         ];
     }
     return $results;
 }
 
-function getTotalThreads($db)
+function getTotalThreads($db, $tag = NULL)
 {
-    return (int) $db->query('SELECT COUNT(*) FROM threads')->fetchColumn();
+    if ($tag === NULL)
+        return (int) $db->query('SELECT COUNT(*) FROM threads')->fetchColumn();
+    $query = $db->prepare('SELECT COUNT(*) FROM threads WHERE tags LIKE :tag');
+    $query->bindValue(':tag', '%' . $tag . '%', PDO::PARAM_STR);
+    $query->execute();
+    return (int) $query->fetchColumn();
 }
 
 function getTotalPosts($db, int $threadId): int
@@ -749,7 +769,7 @@ function timeAgo(int $timestamp): string
 function getThread($config, $db, $threadId, $page, $perPage, &$data)
 {
     $query = $db->prepare('
-        SELECT t.id, t.title, t.user_id, u.username, t.ts_created, t.ts_updated
+        SELECT t.id, t.title, t.user_id, u.username, t.ts_created, t.ts_updated, t.tags
         FROM threads AS t LEFT JOIN users AS u ON t.user_id = u.id WHERE t.id = :id LIMIT 1');
     $query->bindValue(':id', $threadId);
     $query->execute();
@@ -757,6 +777,11 @@ function getThread($config, $db, $threadId, $page, $perPage, &$data)
     if (!$row)
         render(404, '404', $data);
     $data['title'] = $row['title'];
+    $data['tags'] = explode(',', $row['tags']);
+    $data['all_tags'] = [];
+    foreach ($config['tags'] as $tag) {
+        $data['all_tags'][] = ["tag" => $tag, "is_checked" => in_array($tag, $data['tags'])];
+    }
     $data['can_edit'] = isset($_SESSION['user_id']) ? $row['user_id'] === $_SESSION['user_id'] || in_array($_SESSION['username'], $config['adminUsernames']) : FALSE;
     $data['posts'] = [];
 
@@ -993,7 +1018,7 @@ function isSpam($config, $baseurl, $content)
         fclose($fs);
         $response = explode("\r\n\r\n", $response, 2);
     }
-    if ('true' == $response[1])
+    if ('true' === $response[1])
         return true;
     return false;
 }
@@ -1150,6 +1175,19 @@ if ($method === 'GET' && preg_match('/^(p[0-9]{1,3})?$/', $uri, $queryString)) {
     $data['has_pagination'] = $totalPages > 1;
     $data['pages'] = getPaginationPages($page, $totalPages);
     render(200, 'index', $data, 'index');
+} else if ($method === 'GET' && $uri === 'tags') {
+    $data['tags'] = $config['tags'];
+    render(200, 'tags', $data);
+} else if ($method === 'GET' && preg_match('/^tag\/([A-Za-z0-9]{1,50})\/?(p[0-9]{1,3})?$/', $uri, $queryString)) {
+    $data['tag'] = $queryString[1];
+    if (!in_array($data['tag'], $config['tags']))
+        render(404, '404', $data);
+    $page = (count($queryString) === 3) ? (int) substr($queryString[2], 1) : 1;
+    $data['threads'] = getThreads($db, $page, $perPage, $data['tag']);
+    $totalPages = ceil(getTotalThreads($db, $data['tag']) / $perPage);
+    $data['has_pagination'] = $totalPages > 1;
+    $data['pages'] = getPaginationPages($page, $totalPages);
+    render(200, 'index', $data);
 } else if ($method === 'GET' && $uri === 'login') {
     $data['iq_question'] = $config['iqQuestion'];
     render(200, 'login', $data);
@@ -1184,9 +1222,9 @@ if ($method === 'GET' && preg_match('/^(p[0-9]{1,3})?$/', $uri, $queryString)) {
     $data['answer'] = isset($_POST['answer']) ? $_POST['answer'] : '';
     $data['iq_question'] = $config['iqQuestion'];
     render(400, 'login', $data);
-} else if ($method === 'GET' && $uri == 'reset') {
+} else if ($method === 'GET' && $uri === 'reset') {
     render(200, 'reset', $data);
-} else if ($method === 'POST' && $uri == 'reset') {
+} else if ($method === 'POST' && $uri === 'reset') {
     checkCsrf($data);
     checkRateLimit($config, $data, 'reset', 3, 300);
     checkCaptcha($config);
@@ -1217,9 +1255,9 @@ if ($method === 'GET' && preg_match('/^(p[0-9]{1,3})?$/', $uri, $queryString)) {
         }
     }
     render(200, 'reset', $data);
-} else if ($method === 'GET' && $uri == 'verify') {
+} else if ($method === 'GET' && $uri === 'verify') {
     render(200, 'verify', $data);
-} else if ($method === 'POST' && $uri == 'verify') {
+} else if ($method === 'POST' && $uri === 'verify') {
     checkCsrf($data);
     checkRateLimit($config, $data, 'verify', 3, 300);
     checkCaptcha($config);
@@ -1256,11 +1294,11 @@ if ($method === 'GET' && preg_match('/^(p[0-9]{1,3})?$/', $uri, $queryString)) {
         redirect($baseurl);
     }
     render(403, '403', $data);
-} else if ($method === 'GET' && $uri == 'profile/edit') {
+} else if ($method === 'GET' && $uri === 'profile/edit') {
     if (!$data['is_logged_in'])
         redirect($baseurl . 'login');
     render(200, 'profileedit', $data);
-} else if ($method === 'POST' && $uri == 'profile/edit') {
+} else if ($method === 'POST' && $uri === 'profile/edit') {
     if (!$data['is_logged_in'])
         redirect($baseurl . 'login');
     checkCsrf($data);
@@ -1311,12 +1349,14 @@ if ($method === 'GET' && preg_match('/^(p[0-9]{1,3})?$/', $uri, $queryString)) {
 } else if ($method === 'GET' && $uri === 'post') {
     if (!$data['is_logged_in'])
         redirect($baseurl . 'login');
+    $data['tags'] = $config['tags'];
     render(200, 'post', $data);
 } else if ($method === 'POST' && $uri === 'post') {
     if (!$data['is_logged_in'])
         redirect($baseurl . 'login');
     checkCsrf($data);
     checkRateLimit($config, $data, 'post', 5, 10);
+    $data['tags'] = $config['tags'];
     $data['errors'] = [];
     validateThread($config, $baseurl, $data['errors']);
     validatePost($config, $baseurl, $data['errors']);
@@ -1382,7 +1422,7 @@ if ($method === 'GET' && preg_match('/^(p[0-9]{1,3})?$/', $uri, $queryString)) {
     if (!$data['is_logged_in'])
         redirect($baseurl . 'login');
     $threadId = (int) $queryString[1];
-    $thread = getThread($config, $db, $threadId, 1, 1, $data);
+    getThread($config, $db, $threadId, 1, 1, $data);
     $data['id'] = $threadId;
     if ($method === 'GET')
         render(200, 'threadedit', $data);
@@ -1404,7 +1444,7 @@ if ($method === 'GET' && preg_match('/^(p[0-9]{1,3})?$/', $uri, $queryString)) {
     $postId = (int) $queryString[1];
     $post = getPost($config, $db, $postId);
     if (!$post)
-        return render(404, '404', $data);
+        render(404, '404', $data);
     $data['id'] = $postId;
     $data['can_move'] = in_array($_SESSION['username'], $config['adminUsernames']);
     if ($method === 'GET') {
@@ -1452,11 +1492,11 @@ if ($method === 'GET' && preg_match('/^(p[0-9]{1,3})?$/', $uri, $queryString)) {
     movePost($db, $postId, $newThreadId);
     invalidateCache(['index', 'thread/' . $oldThreadId . '/p']);
     redirect($baseurl);
-} else if ($method === 'GET' && $uri == 'upload') {
+} else if ($method === 'GET' && $uri === 'upload') {
     if (!$data['is_logged_in'])
         redirect($baseurl . 'login');
     render(200, 'upload', $data);
-} else if ($method === 'POST' && $uri == 'upload') {
+} else if ($method === 'POST' && $uri === 'upload') {
     if (!$data['is_logged_in'])
         redirect($baseurl . 'login');
     checkCsrf($data);

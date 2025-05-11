@@ -14,6 +14,12 @@
     <p>Posts can be formatted using <a href="https://en.wikipedia.org/wiki/Markdown">Markdown</a>.</p>
     <p><a href="{{baseurl}}upload" id="upload-link">Attach file?</a> <small>(images, txt, zip, pdf, and ifc)</small></p>
     <textarea name="content" id="content">{{content}}</textarea>
+    <p>Choose tags relevant to your post to help discoverability:</p>
+    <ul class="tags">
+    {{#tags}}
+        <li><label><input type="checkbox" name="tags[]" value="{{.}}" /> {{.}}</label></li>
+    {{/tags}}
+    </ul>
     <input type="submit" value="Post" />
 </form>
 <script src="{{baseurl}}marked.min.js"></script>

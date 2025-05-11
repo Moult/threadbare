@@ -178,6 +178,27 @@ input[type="submit"], .button {
     width: 100%;
     border-color: #db2339;
 }
+ul.tags li {
+    display: inline-block;
+}
+ul.tags li input {
+    margin: 0;
+    position: relative;
+    top: -2px;
+}
+ul.tags li label {
+    cursor: pointer;
+    display: inline-block;
+    padding: 0.1em 0.4em;
+    margin: 0 0.1em;
+    border-radius: 4px;
+    font-size: 0.95em;
+    text-decoration: none;
+    transition: background-color 0.2s ease;
+    background-color: #fdecef;
+    color: #e14658;
+    border: 1px solid #f6c5cb;
+}
 nav form {
     float: right;
 }

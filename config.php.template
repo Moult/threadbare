@@ -2,6 +2,7 @@
 return [
     'baseurl' => 'http://localhost/', // With trailing slash
     'websiteTitle' => 'Threadbare Demo',
+    'tags' => ['question', 'showcase', 'intro'],
     'blurb' => 'This is a demo discussion forum for the Threadbare forum software.,
     'iqQuestion' => 'What is the colour of George Washington\'s favourite black horse?',
     'iqAnswer' => 'black',

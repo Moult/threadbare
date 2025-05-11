@@ -11,6 +11,12 @@
     <input type="hidden" name="csrf" value="{{csrf}}" />
     <label for="title">Title</label>
     <input type="text" name="title" value="{{title}}" placeholder="Summarise your topic or question" />
+    <p>Choose tags relevant to your thread to help discoverability:</p>
+    <ul class="tags">
+    {{#all_tags}}
+        <li><label><input type="checkbox" name="tags[]" value="{{tag}}"{{#is_checked}} checked{{/is_checked}} /> {{tag}}</label></li>
+    {{/all_tags}}
+    </ul>
     <input type="submit" value="Edit" />
 </form>
 <form action="{{baseurl}}thread/delete/{{id}}" method="post">

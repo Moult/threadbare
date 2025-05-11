@@ -16,7 +16,8 @@
 {{/is_logged_in}}
 <nav>
     <ul>
-        <li><a href="{{baseurl}}">All Threads</a></li>
+        <li><a href="{{baseurl}}">Home</a></li>
+        <li><a href="{{baseurl}}tags">Tags</a></li>
         <li class="button"><a href="{{baseurl}}post">New Post</a></li>
         {{#is_logged_in}}
         <li>
@@ -29,9 +30,9 @@
         {{^is_logged_in}}
         <li><a href="{{baseurl}}login">Login</a></li>
         {{/is_logged_in}}
-        <li><a href="{{baseurl}}">Wiki</a></li>
-        <li><a href="{{baseurl}}">Live Chat</a></li>
-        <li><a href="{{baseurl}}">News</a></li>
+        <li><a href="https://wiki.osarch.org">Wiki</a></li>
+        <li><a href="https://chat.osarch.org">Chat</a></li>
+        <li><a href="https://osarch.org">News</a></li>
     </ul>
     <form action="{{baseurl}}search" method="get">
         <input type="text" name="q" value="" placeholder="Search">

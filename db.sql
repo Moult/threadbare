@@ -25,6 +25,7 @@ CREATE TABLE "threads" (
 	"ts_created"	INTEGER NOT NULL,
 	"ts_updated"	INTEGER NOT NULL,
     "views"	INTEGER NOT NULL DEFAULT 0,
+	"tags"	TEXT,
 	PRIMARY KEY("id" AUTOINCREMENT)
     FOREIGN KEY("user_id") REFERENCES "users"("id") ON DELETE CASCADE,
     FOREIGN KEY("last_user_id") REFERENCES "users"("id") ON DELETE SET NULL
