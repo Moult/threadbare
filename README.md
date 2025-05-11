@@ -5,6 +5,7 @@ Threadbare is a [frugal](https://idlewords.com/talks/website_obesity.htm) PHP + 
 Threadbare is:
 
  - Free software (AGPL-3.0-or-later)
+ - 400KB. For context, PHPBB is 35MB, Flarum is 65MB, Discourse is ... you don't want to know (hint: 130MB excluding dependencies)
  - A single PHP (i.e. easy to host) file about a thousand lines long with zero boilerplate or design patterns.
  - Uses SQLite. Unless you have a thousand new posts a day, you're not going to notice.
  - 100% works without [JavaScript](https://tonsky.me/blog/js-bloat/). Conservatively optionally enhanced with up to 70KB (before gzip) on the heaviest page.
@@ -18,25 +19,28 @@ Threadbare is not:
 
  - It isn't a fully featured forum. If you're looking for plugins, themes, and a hundred dials, this isn't it.
  - No logging and community metrics.
- - Non-hierarchical. It's just threads and posts. No categories or subcategories.
- - No private messages, profiles, or gamification. Take a deep breath. Enjoy the open-air prose.
+ - Non-hierarchical. It's just threads and posts. No categories or subcategories. It has tags though.
+ - No private messages or gamification. Take a deep breath. Enjoy the open-air prose.
  - Not tested. Let me know if you find any issues.
 
 Features:
 
  - Threads! Posts! Add, edit, delete.
+ - Threads can be tagged. Browse threads by tag.
  - Kudos +1 or -1 on posts.
  - Coloured automatic avatar without images (unless you really want 25 extra HTTP requests to Gravatar on the homepage with leaked email hashes, eh?).
  - Decoupled UI. Have whatever theme you want I guess?
+ - Mobile friendly.
  - File uploads.
  - Live post preview.
  - Auto embed video links. Lazy load images.
  - Markdown formatting in posts.
  - Email notifications on new replies.
  - User mentions with tab autocomplete and email notifications.
- - Login, sign up, reset password, validation emails.
+ - Basic user profile with Markdown bio and latest posts.
+ - Login, sign up, email validation, reset password, edit profile, delete account.
  - Captcha and Akismet.
- - Admins can edit / delete all posts and bypass rate limits. Admins can also move posts to other threads or split into a new thread. Trusted users bypass spam filters.
+ - Admins can edit / delete all posts / users and bypass rate limits. Admins can also move posts to other threads or split into a new thread. Trusted users bypass spam filters.
  - Aggressive caching for guests (using APCu cache).
  - Pagination.
  - Last read stats, views, last reply.
