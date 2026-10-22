@@ -243,6 +243,14 @@ function validateRegistration($config, $db)
 
 function deleteUser($db, $id)
 {
+    // Remove the user's uploaded files; their rows go with the user
+    $query = $db->prepare('SELECT path FROM uploads WHERE user_id = :user_id');
+    $query->bindValue(':user_id', $id);
+    $query->execute();
+    foreach ($query->fetchAll(PDO::FETCH_COLUMN, 0) as $path) {
+        @unlink(__DIR__ . '/uploads/' . $path);
+    }
+
     $query = $db->prepare('DELETE FROM users WHERE id = :id LIMIT 1');
     $query->bindValue(':id', $id);
     $query->execute();
@@ -952,6 +960,12 @@ function handleUpload($config, $db)
     }
     if (!move_uploaded_file($file['tmp_name'], $uploadDir . DIRECTORY_SEPARATOR . $filename))
         render(500, '500', $data);
+
+    $query = $db->prepare('INSERT INTO uploads(path, user_id, ts_created) VALUES(:path, :user_id, :ts_created)');
+    $query->bindValue(':path', $subdir . '/' . $filename);
+    $query->bindValue(':user_id', $_SESSION['user_id']);
+    $query->bindValue(':ts_created', time());
+    $query->execute();
     return $subdir . '/' . $filename;
 }
 
