@@ -1553,12 +1553,16 @@ if ($method === 'GET' && preg_match('/^(p[0-9]{1,3})?$/', $uri, $queryString)) {
     $stmt->bindValue(':limit', $limit);
     $stmt->execute();
     echo json_encode(array_merge($results, $stmt->fetchAll(PDO::FETCH_COLUMN, 0)));
-} else if ($method === 'GET' && $uri === 'notifications') {
+} else if (in_array($method, ['GET', 'POST']) && $uri === 'notifications') {
     if (!$data['is_logged_in'])
         redirect($baseurl . 'login');
-    $query = $db->prepare('UPDATE users SET notifications = NOT notifications WHERE id = :id LIMIT 1');
-    $query->bindValue(':id', $_SESSION['user_id'], PDO::PARAM_INT);
-    $query->execute();
+    if ($method === 'POST') {
+        checkCsrf($data);
+        $query = $db->prepare('UPDATE users SET notifications = NOT notifications WHERE id = :id LIMIT 1');
+        $query->bindValue(':id', $_SESSION['user_id'], PDO::PARAM_INT);
+        $query->execute();
+        $data['is_updated'] = TRUE;
+    }
     $query = $db->prepare('SELECT notifications FROM users WHERE id = :id LIMIT 1');
     $query->bindValue(':id', $_SESSION['user_id'], PDO::PARAM_INT);
     $query->execute();
