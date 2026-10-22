@@ -245,6 +245,14 @@ function validateRegistration($config, $db)
 
 function deleteUser($db, $id)
 {
+    // Remove posts one by one so threads with other people's replies pass to them instead of cascading away
+    $query = $db->prepare('SELECT id, thread_id FROM posts WHERE user_id = :user_id');
+    $query->bindValue(':user_id', $id);
+    $query->execute();
+    foreach ($query->fetchAll() as $row) {
+        removePost($db, $row['id'], $row['thread_id']);
+    }
+
     $query = $db->prepare('DELETE FROM users WHERE id = :id LIMIT 1');
     $query->bindValue(':id', $id);
     $query->execute();
@@ -868,7 +876,12 @@ function deletePost($config, $db, $id)
 
     if (!$threadId)
         return;
+    removePost($db, $id, $threadId);
+}
 
+// Delete a post, then hand its thread to the first remaining poster, or delete the thread if it is now empty
+function removePost($db, $id, $threadId)
+{
     $query = $db->prepare('DELETE FROM posts WHERE id = :id LIMIT 1');
     $query->bindValue(':id', $id);
     $query->execute();
@@ -901,11 +914,14 @@ function deleteThread($config, $db, $id)
     if (in_array($_SESSION['username'], $config['adminUsernames'])) {
         $query = $db->prepare('DELETE FROM threads WHERE id = :id LIMIT 1');
     } else {
-        $query = $db->prepare('DELETE FROM threads WHERE id = :id AND user_id = :user_id LIMIT 1');
+        // Authors may only delete threads nobody else has replied to
+        $query = $db->prepare('DELETE FROM threads WHERE id = :id AND user_id = :user_id
+            AND NOT EXISTS (SELECT 1 FROM posts WHERE thread_id = :id AND user_id != :user_id) LIMIT 1');
         $query->bindValue(':user_id', $_SESSION['user_id']);
     }
     $query->bindValue(':id', $id);
     $query->execute();
+    return $query->rowCount() > 0;
 }
 
 function handleUpload($config, $db)
@@ -1292,6 +1308,7 @@ if ($method === 'GET' && preg_match('/^(p[0-9]{1,3})?$/', $uri, $queryString)) {
     $data['is_valid_code'] = (bool) $userId;
     if ($data['is_valid_code'] && $_POST['confirm']) {
         deleteUser($db, $userId);
+        invalidateCache(['index', 'thread/']);
         logout();
         redirect($baseurl);
     }
@@ -1473,7 +1490,8 @@ if ($method === 'GET' && preg_match('/^(p[0-9]{1,3})?$/', $uri, $queryString)) {
     checkCsrf($data);
     checkRateLimit($config, $data, 'threaddelete', 5, 300);
     $threadId = (int) $queryString[1];
-    deleteThread($config, $db, $threadId);
+    if (!deleteThread($config, $db, $threadId))
+        render(403, '403', $data);
     invalidateCache(['index', 'thread/' . $threadId . '/p']);
     redirect($baseurl);
 } else if ($method === 'POST' && preg_match('/^post\/delete\/([0-9]{1,100})$/', $uri, $queryString)) {
