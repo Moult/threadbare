@@ -19,6 +19,9 @@
         <li><a href="{{baseurl}}">Home</a></li>
         <li><a href="{{baseurl}}tags">Tags</a></li>
         <li class="button"><a href="{{baseurl}}post">New Post</a></li>
+        {{#pending_count}}
+        <li><a href="{{baseurl}}approvals">{{pending_count}} awaiting approval</a></li>
+        {{/pending_count}}
         {{#is_logged_in}}
         <li>
             <form action="{{baseurl}}logout" method="post" class="logout">
