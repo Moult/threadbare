@@ -230,7 +230,8 @@ function validateRegistration($config, $db)
         $errors[] = 'The answer is wrong.';
     }
     if (isset($_POST['username']) && isset($_POST['email'])) {
-        $query = $db->prepare('SELECT COUNT(id) FROM users WHERE username = :username OR email = :email');
+        // Usernames differing only in case would look alike and share @mentions
+        $query = $db->prepare('SELECT COUNT(id) FROM users WHERE LOWER(username) = LOWER(:username) OR email = :email');
         $query->bindParam(':username', $_POST['username']);
         $query->bindParam(':email', $_POST['email']);
         $query->execute();
