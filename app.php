@@ -662,12 +662,12 @@ function getThreads($db, $page = 1, $perPage = 20, $tag = NULL)
         LEFT JOIN posts AS p ON p.thread_id = t.id
         LEFT JOIN thread_reads AS r ON r.thread_id = t.id AND r.user_id = :user_id';
     if ($tag !== NULL) {
-        $sql .= ' WHERE t.tags LIKE :tag';
+        $sql .= " WHERE ',' || t.tags || ',' LIKE :tag"; // Whole tags only: intro must not match introduction
     }
     $sql .= ' GROUP BY t.id ORDER BY t.ts_updated DESC LIMIT :limit OFFSET :offset';
     $query = $db->prepare($sql);
     if ($tag !== NULL) {
-        $query->bindValue(':tag', '%' . $tag . '%', PDO::PARAM_STR);
+        $query->bindValue(':tag', '%,' . $tag . ',%', PDO::PARAM_STR);
     }
     $query->bindValue(':limit', $perPage, PDO::PARAM_INT);
     $query->bindValue(':offset', ($page - 1) * $perPage, PDO::PARAM_INT);
@@ -702,8 +702,8 @@ function getTotalThreads($db, $tag = NULL)
 {
     if ($tag === NULL)
         return (int) $db->query('SELECT COUNT(*) FROM threads')->fetchColumn();
-    $query = $db->prepare('SELECT COUNT(*) FROM threads WHERE tags LIKE :tag');
-    $query->bindValue(':tag', '%' . $tag . '%', PDO::PARAM_STR);
+    $query = $db->prepare("SELECT COUNT(*) FROM threads WHERE ',' || tags || ',' LIKE :tag");
+    $query->bindValue(':tag', '%,' . $tag . ',%', PDO::PARAM_STR);
     $query->execute();
     return (int) $query->fetchColumn();
 }
