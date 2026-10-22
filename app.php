@@ -291,8 +291,10 @@ function getUserByEmail($db, $email)
 // $purpose is 'verify', 'reset' or 'profile'; a code only works for its purpose, for a day
 function generateVerification($db, $userId, $purpose)
 {
-    $query = $db->prepare('DELETE FROM verifications WHERE user_id = :user_id');
+    // Replace only a code for the same purpose: asking for, say, a verification email mustn't cancel a reset link
+    $query = $db->prepare('DELETE FROM verifications WHERE user_id = :user_id AND purpose = :purpose');
     $query->bindValue(':user_id', $userId);
+    $query->bindValue(':purpose', $purpose);
     $query->execute();
 
     $code = bin2hex(random_bytes(32));
