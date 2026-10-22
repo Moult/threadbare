@@ -121,18 +121,18 @@ function regenerateSessionToken($db)
     $_SESSION['token'] = $token;
 }
 
+// Returns FALSE unless hCaptcha confirms the response, including when it can't be reached
 function checkCaptcha($config)
 {
-    $data = ['secret' => $config['hCaptchaSecretKey'], 'response' => $_POST['h-captcha-response']];
+    $request = ['secret' => $config['hCaptchaSecretKey'], 'response' => $_POST['h-captcha-response'] ?? ''];
     $verify = curl_init();
     curl_setopt($verify, CURLOPT_URL, 'https://hcaptcha.com/siteverify');
     curl_setopt($verify, CURLOPT_POST, true);
-    curl_setopt($verify, CURLOPT_POSTFIELDS, http_build_query($data));
+    curl_setopt($verify, CURLOPT_POSTFIELDS, http_build_query($request));
     curl_setopt($verify, CURLOPT_RETURNTRANSFER, true);
     $response = curl_exec($verify);
     $responseData = json_decode($response);
-    if (!$responseData->success)
-        render(403, '403', $data);
+    return !empty($responseData->success);
 }
 
 function validateLogin($db)
@@ -1206,7 +1206,8 @@ if ($method === 'GET' && preg_match('/^(p[0-9]{1,3})?$/', $uri, $queryString)) {
 } else if ($method === 'POST' && $uri === 'register') {
     checkCsrf($data);
     checkRateLimit($config, $data, 'register', 5, 300);
-    checkCaptcha($config);
+    if (checkCaptcha($config) === FALSE)
+        render(403, '403', $data);
     $data['errors'] = validateRegistration($config, $db);
     if (count($data['errors']) === 0) {
         $userId = addUser($db);
@@ -1227,7 +1228,8 @@ if ($method === 'GET' && preg_match('/^(p[0-9]{1,3})?$/', $uri, $queryString)) {
 } else if ($method === 'POST' && $uri === 'reset') {
     checkCsrf($data);
     checkRateLimit($config, $data, 'reset', 3, 300);
-    checkCaptcha($config);
+    if (checkCaptcha($config) === FALSE)
+        render(403, '403', $data);
     $user = getUserByEmail($db, empty($_POST['email']) ? '' : $_POST['email']);
     if ($user) {
         $code = generateVerification($db, $user['id']);
@@ -1260,7 +1262,8 @@ if ($method === 'GET' && preg_match('/^(p[0-9]{1,3})?$/', $uri, $queryString)) {
 } else if ($method === 'POST' && $uri === 'verify') {
     checkCsrf($data);
     checkRateLimit($config, $data, 'verify', 3, 300);
-    checkCaptcha($config);
+    if (checkCaptcha($config) === FALSE)
+        render(403, '403', $data);
     $user = getUserByEmail($db, empty($_POST['email']) ? '' : $_POST['email']);
     if ($user) {
         $code = generateVerification($db, $user['id']);
