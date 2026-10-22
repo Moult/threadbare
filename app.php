@@ -1166,6 +1166,14 @@ class ForumMarkdown extends Parsedown
 generateCsrf($data);
 checkSessionToken($baseurl, $db);
 
+// Fields are strings, except the tags[] checkboxes; anything else would hit a TypeError (500) further on
+foreach ([$_GET, $_POST] as $fields) {
+    foreach ($fields as $name => $value) {
+        if ($name === 'tags' ? !is_array($value) : !is_string($value))
+            render(400, '400', $data);
+    }
+}
+
 $queryString = [];
 if ($method === 'GET' && preg_match('/^(p[0-9]{1,3})?$/', $uri, $queryString)) {
     tryRenderFromCache('index');
