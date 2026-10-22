@@ -518,6 +518,7 @@ function updatePost($db, $id)
 
 function movePost($db, $id, $threadId)
 {
+    $oldThreadId = getThreadId($db, $id);
     $query = $db->prepare('SELECT id FROM threads WHERE id = :thread_id LIMIT 1');
     $query->bindValue(':thread_id', $threadId);
     $query->execute();
@@ -544,6 +545,11 @@ function movePost($db, $id, $threadId)
     $query->bindValue(':thread_id', $threadId, PDO::PARAM_INT);
     $query->bindValue(':user_id', $row['first_user_id'], PDO::PARAM_INT);
     $query->bindValue(':last_user_id', $row['last_user_id'], PDO::PARAM_INT);
+    $query->execute();
+
+    // Don't leave the old thread behind with no posts
+    $query = $db->prepare('DELETE FROM threads WHERE id = :id AND NOT EXISTS (SELECT 1 FROM posts WHERE thread_id = :id)');
+    $query->bindValue(':id', $oldThreadId);
     $query->execute();
 }
 
@@ -1595,7 +1601,7 @@ if ($method === 'GET' && preg_match('/^(p[0-9]{1,3})?$/', $uri, $queryString)) {
     $oldThreadId = getThreadId($db, $postId);
     $newThreadId = (int) $_POST['thread_id'];
     movePost($db, $postId, $newThreadId);
-    invalidateCache(['index', 'thread/' . $oldThreadId . '/p']);
+    invalidateCache(['index', 'thread/' . $oldThreadId . '/p', 'thread/' . $newThreadId . '/p']);
     redirect($baseurl);
 } else if ($method === 'GET' && $uri === 'upload') {
     if (!$data['is_logged_in'])
