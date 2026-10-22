@@ -812,7 +812,7 @@ function getThread($config, $db, $threadId, $page, $perPage, &$data)
         $content = postProcessMentions($content);
         $row['can_vote'] = !empty($_SESSION['user_id']) && $_SESSION['user_id'] !== $row['user_id'];
         $row['has_votes'] = $row['upvotes'] || $row['downvotes'];
-        $row['rabbits'] = str_repeat('🐇', $row['upvotes'] - $row['downvotes']);
+        $row['rabbits'] = str_repeat('🐇', max(0, $row['upvotes'] - $row['downvotes']));
         $row['user_upvote'] = $row['user_vote'] === 1;
         $row['user_vote'] = $row['user_vote'] !== NULL;
         $row['ts_updated'] = $row['ts_updated'] > $row['ts_created'] + 5 ? date('j M Y', $row['ts_updated']) : '';
