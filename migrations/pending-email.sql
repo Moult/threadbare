@@ -2,4 +2,5 @@
 -- $ sqlite3 threadbare.db < migrations/pending-email.sql
 ALTER TABLE users ADD COLUMN "pending_email" TEXT;
 ALTER TABLE users ADD COLUMN "pending_email_code" TEXT;
+ALTER TABLE users ADD COLUMN "pending_email_ts" INTEGER;
 CREATE UNIQUE INDEX IF NOT EXISTS users_pending_email_code ON users(pending_email_code);

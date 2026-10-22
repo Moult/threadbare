@@ -472,18 +472,20 @@ function updateProfile($db, $id)
     $query->bindValue(':id', $id);
     $query->execute();
     $code = $query->fetchColumn() === $_POST['email'] ? NULL : bin2hex(random_bytes(32));
-    $query = $db->prepare('UPDATE users SET pending_email = :email, pending_email_code = :code WHERE id = :id LIMIT 1');
+    $query = $db->prepare('UPDATE users SET pending_email = :email, pending_email_code = :code, pending_email_ts = :ts WHERE id = :id LIMIT 1');
     $query->bindValue(':id', $id);
     $query->bindValue(':email', $code ? $_POST['email'] : NULL); // Unchanged email cancels any pending change
     $query->bindValue(':code', $code);
+    $query->bindValue(':ts', $code ? time() : NULL);
     $query->execute();
     return $code;
 }
 
 function confirmEmail($db, $code)
 {
-    $query = $db->prepare('SELECT id, pending_email FROM users WHERE pending_email_code = :code LIMIT 1');
+    $query = $db->prepare('SELECT id, pending_email FROM users WHERE pending_email_code = :code AND pending_email_ts > :since LIMIT 1');
     $query->bindValue(':code', $code);
+    $query->bindValue(':since', time() - 86400); // Like other emailed codes, it works for a day
     $query->execute();
     $row = $query->fetch();
     if (!$row || isEmailTaken($db, $row['pending_email'], $row['id']))

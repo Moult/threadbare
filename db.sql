@@ -9,6 +9,7 @@ CREATE TABLE "users" (
 	"bio"	TEXT,
 	"pending_email"	TEXT,
 	"pending_email_code"	TEXT UNIQUE,
+	"pending_email_ts"	INTEGER,
 	PRIMARY KEY("id" AUTOINCREMENT)
 );
 
