@@ -1290,7 +1290,8 @@ if ($method === 'GET' && preg_match('/^(p[0-9]{1,3})?$/', $uri, $queryString)) {
     $data['is_valid_code'] = (bool) $userId;
     if ($data['is_valid_code'] && $_POST['confirm']) {
         deleteUser($db, $userId);
-        logout();
+        if ((int) $userId === (int) $_SESSION['user_id']) // An admin deleting someone else stays logged in
+            logout();
         redirect($baseurl);
     }
     render(403, '403', $data);
