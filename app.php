@@ -1288,9 +1288,8 @@ if ($method === 'GET' && preg_match('/^(p[0-9]{1,3})?$/', $uri, $queryString)) {
         redirect($baseurl . 'login');
     checkCsrf($data);
     $userId = checkVerificationCode($config, $db, $queryString[1]);
-    var_dump($_POST['confirm']);
     $data['is_valid_code'] = (bool) $userId;
-    if ($data['is_valid_code'] && $_POST['confirm']) {
+    if ($data['is_valid_code'] && !empty($_POST['confirm'])) {
         deleteUser($db, $userId);
         logout();
         redirect($baseurl);
