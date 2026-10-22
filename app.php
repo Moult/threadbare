@@ -1297,7 +1297,7 @@ if ($method === 'GET' && preg_match('/^(p[0-9]{1,3})?$/', $uri, $queryString)) {
     $Parsedown->setSafeMode(true);
     $data['bio'] = $Parsedown->text($data['bio']);
     $data['posts'] = getLatestPosts($db, $queryString[1], $perPage);
-    $data['can_edit'] = isset($_SESSION['user_id']) ? $queryString[1] === $_SESSION['user_id'] || in_array($_SESSION['username'], $config['adminUsernames']) : FALSE;
+    $data['can_edit'] = isset($_SESSION['user_id']) ? (int) $queryString[1] === (int) $_SESSION['user_id'] || in_array($_SESSION['username'], $config['adminUsernames']) : FALSE;
     render(200, 'profile', $data);
 } else if ($method === 'POST' && preg_match('/^profile\/delete\/([A-Za-z0-9]{1,100})$/', $uri, $queryString)) {
     if (!$data['is_logged_in'])
