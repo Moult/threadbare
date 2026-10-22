@@ -1056,7 +1056,8 @@ function handleUpload($config, $db, $data)
 function recordThreadView($db, $threadId)
 {
     $key = "viewed_thread_$threadId";
-    if (!isset($_SESSION[$key])) {
+    // Only count clients that send the session cookie back: one that never does (most bots) would be a new view, and a write, on every request
+    if (!isset($_SESSION[$key]) && isset($_COOKIE[session_name()])) {
         $_SESSION[$key] = true;
         $query = $db->prepare('UPDATE threads SET views = views + 1 WHERE id = ?');
         $query->execute([$threadId]);
