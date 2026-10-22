@@ -35,7 +35,7 @@ $perPage = 25;
 $db = new \PDO('sqlite:' . __DIR__ . '/threadbare.db');
 $db->exec('PRAGMA foreign_keys = ON;');
 $method = $_SERVER['REQUEST_METHOD'];
-$uri = trim($_SERVER['REQUEST_URI'], '/');
+$uri = trim(strtok($_SERVER['REQUEST_URI'], '?'), '/'); // Route on the path; ?utm_source= etc. must not 404
 $data = ['baseurl' => $baseurl, 'csrf' => $_SESSION['csrf'], 'captcha' => $config['hCaptchaSiteKey'], 'html_title' => $config['websiteTitle'], 'h1' => $config['websiteTitle'], 'blurb' => $config['blurb']];
 if (isset($_SESSION['username'])) {
     $data['is_logged_in'] = TRUE;
@@ -1115,7 +1115,7 @@ function tryRenderFromCache($key): void
 {
     if (!empty($_SESSION['user_id']))
         return;
-    $html = apcu_fetch('html_' . $key . '_' . sha1($_SERVER['REQUEST_URI']));
+    $html = apcu_fetch('html_' . $key . '_' . sha1(strtok($_SERVER['REQUEST_URI'], '?')));
     if ($html !== false) {
         echo $html;
         exit;
@@ -1124,7 +1124,7 @@ function tryRenderFromCache($key): void
 
 function saveCache($key, string $html, int $ttl = 900): void
 {
-    apcu_store('html_' . $key . '_' . sha1($_SERVER['REQUEST_URI']), $html, $ttl);
+    apcu_store('html_' . $key . '_' . sha1(strtok($_SERVER['REQUEST_URI'], '?')), $html, $ttl);
 }
 
 function invalidateCache($keys)
