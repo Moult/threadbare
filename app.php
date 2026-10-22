@@ -300,7 +300,6 @@ function sendEmail($config, $to, $subject, $content)
         ];
         curl_setopt($ch, CURLOPT_POSTFIELDS, json_encode($data));
         $response = curl_exec($ch);
-        curl_close($ch);
         return (curl_getinfo($ch, CURLINFO_HTTP_CODE) === 202);
     } catch (Exception $e) {
         return FALSE;
