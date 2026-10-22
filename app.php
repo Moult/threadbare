@@ -1423,6 +1423,8 @@ if ($method === 'GET' && preg_match('/^(p[0-9]{1,3})?$/', $uri, $queryString)) {
         redirect($baseurl . 'login');
     $threadId = (int) $queryString[1];
     getThread($config, $db, $threadId, 1, 1, $data);
+    if (!$data['can_edit'])
+        render(403, '403', $data);
     $data['id'] = $threadId;
     if ($method === 'GET')
         render(200, 'threadedit', $data);
