@@ -925,7 +925,7 @@ function deleteThread($config, $db, $id)
     return $query->rowCount() > 0;
 }
 
-function handleUpload($config, $db)
+function handleUpload($config, $db, $data)
 {
     if (!isset($_FILES['attachment']) || $_FILES['attachment']['error'] !== UPLOAD_ERR_OK)
         render(400, '400', $data);
@@ -933,7 +933,7 @@ function handleUpload($config, $db)
     $file = $_FILES['attachment'];
 
     if ($file['size'] > $config['maxUploadMb'] * 1024 * 1024) {
-        die('File too large.');
+        render(400, '400', $data);
     }
 
     $allowedTypes = [
@@ -1523,7 +1523,7 @@ if ($method === 'GET' && preg_match('/^(p[0-9]{1,3})?$/', $uri, $queryString)) {
         redirect($baseurl . 'login');
     checkCsrf($data);
     checkRateLimit($config, $data, 'upload', 10, 300);
-    $data['filename'] = handleUpload($config, $db);
+    $data['filename'] = handleUpload($config, $db, $data);
     if (!isset($_POST['useJS']))
         render(200, 'upload', $data);
     http_response_code(201);
