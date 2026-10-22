@@ -1399,6 +1399,11 @@ if ($method === 'GET' && preg_match('/^(p[0-9]{1,3})?$/', $uri, $queryString)) {
     checkCsrf($data);
     $page = (count($queryString) === 4) ? (int) substr($queryString[3], 1) : 1;
     $threadId = (int) $queryString[1];
+    $query = $db->prepare('SELECT id FROM threads WHERE id = :id LIMIT 1');
+    $query->bindValue(':id', $threadId);
+    $query->execute();
+    if (!$query->fetchColumn())
+        render(404, '404', $data);
     $data['errors'] = [];
     validatePost($config, $baseurl, $data['errors']);
     if (count($data['errors']) === 0) {
