@@ -962,7 +962,6 @@ function removePost($db, $id, $threadId)
     $query = $db->prepare('DELETE FROM posts WHERE id = :id LIMIT 1');
     $query->bindValue(':id', $id);
     $query->execute();
-    $query->fetch();
 
     $query = $db->prepare('
         SELECT
