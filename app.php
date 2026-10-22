@@ -188,8 +188,8 @@ function validatePassword()
     $errors = [];
     $fields = ['password', 'password2'];
     foreach ($fields as $field) {
-        if (!isset($_POST[$field]) || !is_string($_POST[$field]) || strlen($_POST[$field]) < 3 || strlen($_POST[$field]) > 50) {
-            $errors[] = ucfirst(trim($field, '2')) . ' needs to be at least 3-50 characters long.';
+        if (!isset($_POST[$field]) || !is_string($_POST[$field]) || strlen($_POST[$field]) < 8 || strlen($_POST[$field]) > 50) {
+            $errors[] = ucfirst(trim($field, '2')) . ' needs to be 8-50 characters long.';
         }
     }
     if (isset($_POST['password']) && isset($_POST['password2']) && $_POST['password'] !== $_POST['password2']) {
@@ -203,8 +203,9 @@ function validateRegistration($config, $db)
     $errors = [];
     $fields = ['username', 'password', 'password2', 'email', 'answer'];
     foreach ($fields as $field) {
-        if (!isset($_POST[$field]) || !is_string($_POST[$field]) || strlen($_POST[$field]) < 3 || strlen($_POST[$field]) > 50) {
-            $errors[] = ucfirst(trim($field, '2')) . ' needs to be at least 3-50 characters long.';
+        $min = in_array($field, ['password', 'password2']) ? 8 : 3;
+        if (!isset($_POST[$field]) || !is_string($_POST[$field]) || strlen($_POST[$field]) < $min || strlen($_POST[$field]) > 50) {
+            $errors[] = ucfirst(trim($field, '2')) . " needs to be $min-50 characters long.";
         }
         if (isset($_POST[$field])) {
             $_POST[$field] = str_replace(["\r", "\n"], '', $_POST[$field]);
