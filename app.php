@@ -1527,30 +1527,23 @@ if ($method === 'GET' && preg_match('/^(p[0-9]{1,3})?$/', $uri, $queryString)) {
     $threadId = getThreadId($db, $postId);
     redirect($baseurl . 'thread/' . $threadId . '/p' . $page . '#' . $postId);
 } else if ($method === 'GET' && preg_match('/^mention(\/[0-9]{1,50})?\/@([A-Za-z0-9_-]{1,100})$/', $uri, $queryString)) {
-    $limit = 5;
+    if (!$data['is_logged_in'])
+        render(403, '403', $data);
+    header('Content-Type: application/json');
+    $query = str_replace('_', '\_', $queryString[2]) . '%'; // _ is a LIKE wildcard but valid in usernames
     $results = [];
-    if (count($queryString) === 3) {
+    if ($queryString[1] !== '') {
         // Prioritise usernames in thread
-        $query = $queryString[2];
-        $stmt = $db->prepare('SELECT DISTINCT u.username FROM posts AS p LEFT JOIN users AS u ON p.user_id = u.id WHERE p.thread_id = :thread_id AND u.username LIKE :query ORDER BY u.username LIMIT 5');
+        $stmt = $db->prepare("SELECT DISTINCT u.username FROM posts AS p LEFT JOIN users AS u ON p.user_id = u.id WHERE p.thread_id = :thread_id AND u.username LIKE :query ESCAPE '\\' ORDER BY u.username LIMIT 5");
         $stmt->bindValue(':thread_id', substr($queryString[1], 1));
-        $stmt->bindValue(':query', $query . '%');
+        $stmt->bindValue(':query', $query);
         $stmt->execute();
         $results = $stmt->fetchAll(PDO::FETCH_COLUMN, 0);
-        $limit = $limit - count($results);
-        if (!$limit) {
-            echo json_encode($results);
-            exit;
-        }
-    } else {
-        $query = $queryString[1];
     }
-    header('Content-Type: application/json');
-    $stmt = $db->prepare('SELECT username FROM users WHERE username LIKE :query ORDER BY username LIMIT :limit');
-    $stmt->bindValue(':query', $query . '%');
-    $stmt->bindValue(':limit', $limit);
+    $stmt = $db->prepare("SELECT username FROM users WHERE username LIKE :query ESCAPE '\\' ORDER BY username LIMIT 5");
+    $stmt->bindValue(':query', $query);
     $stmt->execute();
-    echo json_encode(array_merge($results, $stmt->fetchAll(PDO::FETCH_COLUMN, 0)));
+    echo json_encode(array_slice(array_values(array_unique(array_merge($results, $stmt->fetchAll(PDO::FETCH_COLUMN, 0)))), 0, 5));
 } else if ($method === 'GET' && $uri === 'notifications') {
     if (!$data['is_logged_in'])
         redirect($baseurl . 'login');
