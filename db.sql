@@ -7,6 +7,8 @@ CREATE TABLE "users" (
 	"notifications"	INTEGER NOT NULL DEFAULT 1,
 	"session_token"	TEXT,
 	"bio"	TEXT,
+	"pending_email"	TEXT,
+	"pending_email_code"	TEXT UNIQUE,
 	PRIMARY KEY("id" AUTOINCREMENT)
 );
 
