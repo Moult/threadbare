@@ -213,9 +213,6 @@ function validateRegistration($config, $db)
     if (isset($_POST['username']) && !preg_match('/^[a-zA-Z0-9_-]+$/', $_POST['username'])) {
         $errors[] = 'Username can only contain letters, numbers, underscores, and hyphens.';
     }
-    if (preg_match('/\s{2,}/', $_POST['username']) || preg_match('/^\s|\s$/', $_POST['username'])) {
-        $errors[] = 'Username cannot have leading/trailing or multiple consecutive spaces.';
-    }
     if (isset($_POST['password']) && isset($_POST['password2']) && $_POST['password'] !== $_POST['password2']) {
         $errors[] = 'Passwords do not match.';
     }
