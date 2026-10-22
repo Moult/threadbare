@@ -111,14 +111,16 @@ function checkSessionToken($baseurl, $db)
     }
 }
 
-function regenerateSessionToken($db)
+function regenerateSessionToken($db, $userId)
 {
     $token = bin2hex(random_bytes(32));
     $query = $db->prepare('UPDATE users SET session_token = :session_token WHERE id = :id');
-    $query->bindValue(':id', $_SESSION['user_id']);
+    $query->bindValue(':id', $userId);
     $query->bindValue(':session_token', $token);
     $query->execute();
-    $_SESSION['token'] = $token;
+    // Keep the current session only if it belongs to that user (e.g. not an admin editing someone else)
+    if (isset($_SESSION['user_id']) && (int) $_SESSION['user_id'] === (int) $userId)
+        $_SESSION['token'] = $token;
 }
 
 function checkCaptcha($config)
@@ -158,7 +160,7 @@ function login($db, $user)
     $_SESSION['username'] = $user['username'];
     $_SESSION['token'] = getSessionToken($db);
     if (!$_SESSION['token']) {
-        regenerateSessionToken($db);
+        regenerateSessionToken($db, $user['id']);
     }
 }
 
@@ -1250,7 +1252,7 @@ if ($method === 'GET' && preg_match('/^(p[0-9]{1,3})?$/', $uri, $queryString)) {
         $data['errors'] = validatePassword();
         if (count($data['errors']) === 0) {
             updatePassword($db, $userId);
-            regenerateSessionToken($db);
+            regenerateSessionToken($db, $userId);
             $data['is_success'] = TRUE;
         }
     }
@@ -1335,7 +1337,7 @@ if ($method === 'GET' && preg_match('/^(p[0-9]{1,3})?$/', $uri, $queryString)) {
         $data['errors'] = validateProfile($config, $baseurl);
         if (count($data['errors']) === 0) {
             updateProfile($db, $userId);
-            regenerateSessionToken($db);
+            regenerateSessionToken($db, $userId);
             $data['is_success'] = TRUE;
         } else {
             $data['has_errors'] = TRUE;
