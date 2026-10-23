@@ -1934,8 +1934,30 @@ if ($method === 'GET' && preg_match('/^(p[0-9]{1,3})?$/', $uri, $queryString)) {
     $query->execute();
     $data['is_on'] = (bool) $query->fetchColumn();
     render(200, 'notifications', $data);
-} else if ($method === 'GET' && str_starts_with($uri, 'search')) {
-    redirect('https://duckduckgo.com/?q=' . urlencode('site:' . $baseurl . ' ' . trim($_GET['q'] ?? '')));
+} else if ($method === 'GET' && $uri === 'search') {
+    $q = trim(is_string($_GET['q'] ?? NULL) ? $_GET['q'] : '');
+    if (preg_match('/^#([A-Za-z0-9_]{1,50})$/', $q, $m))
+        redirect($baseurl . 'tag/' . (in_array($m[1], $config['tags']) ? $m[1] : strtolower($m[1])));
+    $data['web_search'] = 'https://duckduckgo.com/?q=' . urlencode('site:' . $baseurl . ' ' . $q);
+    // Guests get a web search, so no page that queries the database on every request is open to crawlers
+    if (!$data['is_logged_in'] || mb_strlen($q) < 2 || mb_strlen($q) > 100)
+        redirect($data['web_search']);
+    checkRateLimit($config, $data, 'search', 10, 60);
+    $like = '%' . str_replace(['\\', '%', '_'], ['\\\\', '\\%', '\\_'], $q) . '%';
+    $data['heading'] = 'Search results for: ' . $q;
+    $data['search'] = $q;
+    $data['threads'] = getThreads($db, 1, 50, "t.title LIKE :q ESCAPE '\\'", [':q' => $like]);
+    // Not people with posts awaiting approval, as those accounts are often spam
+    $query = $db->prepare("SELECT id, username FROM users WHERE username LIKE :q ESCAPE '\\'
+        AND NOT EXISTS (SELECT 1 FROM posts WHERE user_id = users.id AND is_approved = 0) ORDER BY username LIMIT 20");
+    $query->bindValue(':q', $like);
+    $query->execute();
+    $data['users'] = [];
+    foreach ($query->fetchAll(PDO::FETCH_ASSOC) as $row) {
+        $data['users'][] = $row + ['avatar' => avatar($row['username']), 'initial' => strtoupper($row['username'][0])];
+    }
+    $data['no_results'] = !$data['threads'] && !$data['users'];
+    render(200, 'index', $data);
 } else {
     render(404, '404', $data);
 }

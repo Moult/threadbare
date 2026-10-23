@@ -333,6 +333,9 @@ article .usertag {
 article .hashtag {
     text-decoration: none;
 }
+.user-result .avatar {
+    float: none;
+}
 .spinner {
     display:inline-block;
     width:16px;
