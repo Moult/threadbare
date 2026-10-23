@@ -4,3 +4,11 @@
     <li><a href="{{baseurl}}tag/{{.}}">{{.}}</a></li>
     {{/tags}}
 </ul>
+{{#has_hashtags}}
+<p>Hashtags used in recent posts:</p>
+<ul class="hashtags">
+    {{#hashtags}}
+    <li><a href="{{baseurl}}tag/{{.}}">#{{.}}</a></li>
+    {{/hashtags}}
+</ul>
+{{/has_hashtags}}

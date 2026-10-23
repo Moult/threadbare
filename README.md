@@ -40,6 +40,7 @@ Features:
  - Basic user profile with Markdown bio and latest posts.
  - Login, sign up, email validation, reset password, edit profile, delete account.
  - Captcha and Akismet.
+ - New users' posts are held until an admin approves them, so spam sign-ups never reach the forum. Admins see the queue in the header and get an email when someone new posts.
  - Admins can edit / delete all posts / users and bypass rate limits. Admins can also move posts to other threads or split into a new thread. Trusted users bypass spam filters.
  - Aggressive caching for guests (using APCu cache).
  - Pagination.
