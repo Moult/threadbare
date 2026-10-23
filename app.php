@@ -1726,6 +1726,12 @@ if ($method === 'GET' && preg_match('/^(p[0-9]{1,3})?$/', $uri, $queryString)) {
     $postId = (int) $queryString[1];
     $oldThreadId = getThreadId($db, $postId);
     $newThreadId = (int) $_POST['thread_id'];
+    // A held thread must stay hidden until it's approved, so nothing can be moved into it
+    $query = $db->prepare('SELECT 1 FROM threads WHERE id = :id AND NOT EXISTS (SELECT 1 FROM posts WHERE thread_id = :id AND is_approved = 1)');
+    $query->bindValue(':id', $newThreadId);
+    $query->execute();
+    if ($query->fetchColumn())
+        render(400, '400', $data);
     movePost($db, $postId, $newThreadId);
     invalidateCache(['index', 'thread/' . $oldThreadId . '/p', 'thread/' . $newThreadId . '/p']);
     redirect($baseurl);
