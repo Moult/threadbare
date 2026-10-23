@@ -1,7 +1,7 @@
 # The post approval migration approves users who have posted, and leaves those who haven't to be approved
 source "$(dirname "$0")/../lib.sh"
 OLD=$WORK/old.db
-sed '/"is_approved"/d; /posts_pending/d' "$ROOT/db.sql" > "$WORK/old.sql"  # the schema before the change
+sed '/is_approved/d' "$ROOT/db.sql" > "$WORK/old.sql"  # the schema before the change
 php -r '$db = new PDO("sqlite:" . $argv[1]); $db->exec(file_get_contents($argv[2]));
     $db->exec("INSERT INTO users(username, password, email, is_verified) VALUES(\"poster\", \"x\", \"poster@example.invalid\", 1), (\"lurker\", \"x\", \"lurker@example.invalid\", 1)");
     $db->exec("INSERT INTO threads(title, user_id, ts_created, ts_updated) VALUES(\"Old thread\", 1, 0, 0)");
