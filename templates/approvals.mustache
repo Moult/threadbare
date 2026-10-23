@@ -26,3 +26,25 @@
     </li>
 {{/pending}}
 </ol>
+<h2 id="flagged">Flagged</h2>
+<p>Members can flag a post as offensive. Flags are anonymous: nobody, not even admins, can see who flagged a post. Edit or delete the post, or dismiss its flags if it's fine.</p>
+{{^flagged}}
+<p>No posts are flagged.</p>
+{{/flagged}}
+<ol class="posts approvals">
+{{#flagged}}
+    <li class="post">
+        <span class="metadata">
+            <strong>&#x2691; {{flags}}</strong>
+            by <a href="{{baseurl}}profile/{{user_id}}">{{username}}</a> on <strong>{{ts_created}}</strong>
+            in <a href="{{baseurl}}thread/{{thread_id}}">{{title}}</a>
+        </span>
+        <pre>{{content}}</pre>
+        <a href="{{baseurl}}post/edit/{{id}}">Edit or delete this post</a>
+        <form action="{{baseurl}}approvals/dismiss-flags/{{id}}" method="post">
+            <input type="hidden" name="csrf" value="{{csrf}}" />
+            <input type="submit" value="Dismiss flags" />
+        </form>
+    </li>
+{{/flagged}}
+</ol>
