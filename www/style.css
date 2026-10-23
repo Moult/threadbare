@@ -340,6 +340,12 @@ article .usertag {
     color: #e14658;
     border: 1px solid #f6c5cb;
 }
+article .hashtag {
+    text-decoration: none;
+}
+.user-result .avatar {
+    float: none;
+}
 .spinner {
     display:inline-block;
     width:16px;
