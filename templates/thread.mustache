@@ -29,8 +29,8 @@
               <input type="hidden" name="csrf" value="{{csrf}}">
               <input type="hidden" name="post_id" value="{{id}}">
               <input type="hidden" name="page" value="{{page}}">
-              <button name="vote" value="1" {{#user_vote_is_upvoted}}disabled{{/user_vote_is_upvoted}}>&blacktriangle;</button>
-              <button name="vote" value="-1" {{#user_vote_is_downvoted}}disabled{{/user_vote_is_downvoted}}>&blacktriangledown;</button>
+              <button name="vote" value="1" aria-pressed="{{#user_vote_is_upvoted}}true{{/user_vote_is_upvoted}}{{^user_vote_is_upvoted}}false{{/user_vote_is_upvoted}}">&blacktriangle;</button>
+              <button name="vote" value="-1" aria-pressed="{{#user_vote_is_downvoted}}true{{/user_vote_is_downvoted}}{{^user_vote_is_downvoted}}false{{/user_vote_is_downvoted}}">&blacktriangledown;</button>
             </form>
             {{/can_vote}}
         </span>
