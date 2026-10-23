@@ -111,14 +111,16 @@ function checkSessionToken($baseurl, $db)
     }
 }
 
-function regenerateSessionToken($db)
+function regenerateSessionToken($db, $userId)
 {
     $token = bin2hex(random_bytes(32));
     $query = $db->prepare('UPDATE users SET session_token = :session_token WHERE id = :id');
-    $query->bindValue(':id', $_SESSION['user_id']);
+    $query->bindValue(':id', $userId);
     $query->bindValue(':session_token', $token);
     $query->execute();
-    $_SESSION['token'] = $token;
+    // Keep the current session only if it belongs to that user (e.g. not an admin editing someone else)
+    if (isset($_SESSION['user_id']) && (int) $_SESSION['user_id'] === (int) $userId)
+        $_SESSION['token'] = $token;
 }
 
 function checkCaptcha($config)
@@ -158,7 +160,7 @@ function login($db, $user)
     $_SESSION['username'] = $user['username'];
     $_SESSION['token'] = getSessionToken($db);
     if (!$_SESSION['token']) {
-        regenerateSessionToken($db);
+        regenerateSessionToken($db, $user['id']);
     }
 }
 
@@ -860,7 +862,7 @@ function getThread($config, $db, $threadId, $page, $perPage, &$data)
         $content = postProcessMentions($content);
         $row['can_vote'] = !empty($_SESSION['user_id']) && $_SESSION['user_id'] !== $row['user_id'];
         $row['has_votes'] = $row['upvotes'] || $row['downvotes'];
-        $row['rabbits'] = str_repeat('🐇', $row['upvotes'] - $row['downvotes']);
+        $row['rabbits'] = str_repeat('🐇', max(0, $row['upvotes'] - $row['downvotes']));
         $row['user_upvote'] = $row['user_vote'] === 1;
         $row['user_vote'] = $row['user_vote'] !== NULL;
         $row['ts_updated'] = $row['ts_updated'] > $row['ts_created'] + 5 ? date('j M Y', $row['ts_updated']) : '';
@@ -1298,7 +1300,7 @@ if ($method === 'GET' && preg_match('/^(p[0-9]{1,3})?$/', $uri, $queryString)) {
         $data['errors'] = validatePassword();
         if (count($data['errors']) === 0) {
             updatePassword($db, $userId);
-            regenerateSessionToken($db);
+            regenerateSessionToken($db, $userId);
             $data['is_success'] = TRUE;
         }
     }
@@ -1337,9 +1339,8 @@ if ($method === 'GET' && preg_match('/^(p[0-9]{1,3})?$/', $uri, $queryString)) {
         redirect($baseurl . 'login');
     checkCsrf($data);
     $userId = checkVerificationCode($config, $db, $queryString[1]);
-    var_dump($_POST['confirm']);
     $data['is_valid_code'] = (bool) $userId;
-    if ($data['is_valid_code'] && $_POST['confirm']) {
+    if ($data['is_valid_code'] && !empty($_POST['confirm'])) {
         deleteUser($db, $userId);
         logout();
         redirect($baseurl);
@@ -1386,7 +1387,7 @@ if ($method === 'GET' && preg_match('/^(p[0-9]{1,3})?$/', $uri, $queryString)) {
         $data['errors'] = validateProfile($config, $baseurl, $db, $userId);
         if (count($data['errors']) === 0) {
             $emailCode = updateProfile($db, $userId);
-            regenerateSessionToken($db);
+            regenerateSessionToken($db, $userId);
             if ($emailCode) {
                 if (sendEmailChangeEmail($config, $_POST['email'], $emailCode) === FALSE)
                     render(500, '500', $data);
@@ -1479,6 +1480,8 @@ if ($method === 'GET' && preg_match('/^(p[0-9]{1,3})?$/', $uri, $queryString)) {
         redirect($baseurl . 'login');
     $threadId = (int) $queryString[1];
     getThread($config, $db, $threadId, 1, 1, $data);
+    if (!$data['can_edit'])
+        render(403, '403', $data);
     $data['id'] = $threadId;
     if ($method === 'GET')
         render(200, 'threadedit', $data);
@@ -1607,12 +1610,16 @@ if ($method === 'GET' && preg_match('/^(p[0-9]{1,3})?$/', $uri, $queryString)) {
     $stmt->bindValue(':limit', $limit);
     $stmt->execute();
     echo json_encode(array_merge($results, $stmt->fetchAll(PDO::FETCH_COLUMN, 0)));
-} else if ($method === 'GET' && $uri === 'notifications') {
+} else if (in_array($method, ['GET', 'POST']) && $uri === 'notifications') {
     if (!$data['is_logged_in'])
         redirect($baseurl . 'login');
-    $query = $db->prepare('UPDATE users SET notifications = NOT notifications WHERE id = :id LIMIT 1');
-    $query->bindValue(':id', $_SESSION['user_id'], PDO::PARAM_INT);
-    $query->execute();
+    if ($method === 'POST') {
+        checkCsrf($data);
+        $query = $db->prepare('UPDATE users SET notifications = NOT notifications WHERE id = :id LIMIT 1');
+        $query->bindValue(':id', $_SESSION['user_id'], PDO::PARAM_INT);
+        $query->execute();
+        $data['is_updated'] = TRUE;
+    }
     $query = $db->prepare('SELECT notifications FROM users WHERE id = :id LIMIT 1');
     $query->bindValue(':id', $_SESSION['user_id'], PDO::PARAM_INT);
     $query->execute();
