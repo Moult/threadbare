@@ -33,7 +33,8 @@ header('Permissions-Policy: camera=(), microphone=(), geolocation=()');
 $baseurl = $config['baseurl'];
 $perPage = 25;
 $db = new \PDO('sqlite:' . __DIR__ . '/threadbare.db');
-$db->exec('PRAGMA foreign_keys = ON;');
+// WAL lets pages be read while something is written, and a request waits at most 5s for a write lock rather than 60s
+$db->exec('PRAGMA journal_mode = WAL; PRAGMA synchronous = NORMAL; PRAGMA busy_timeout = 5000; PRAGMA foreign_keys = ON;');
 $method = $_SERVER['REQUEST_METHOD'];
 $uri = trim(strtok($_SERVER['REQUEST_URI'], '?'), '/'); // Route on the path; ?utm_source= etc. must not 404
 $data = ['baseurl' => $baseurl, 'csrf' => $_SESSION['csrf'], 'captcha' => $config['hCaptchaSiteKey'], 'html_title' => $config['websiteTitle'], 'h1' => $config['websiteTitle'], 'blurb' => $config['blurb']];
