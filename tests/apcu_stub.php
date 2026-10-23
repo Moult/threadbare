@@ -47,6 +47,8 @@ if (!function_exists('apcu_fetch')) {
     }
     function apcu_cache_info()
     {
+        if (str_ends_with(debug_backtrace()[0]['file'] ?? '', '/app.php')) // Tests check the forum never lists the cache
+            file_put_contents(getenv('APCU_STUB_FILE') . '.listed', "listed\n", FILE_APPEND);
         return ['cache_list' => array_map(fn($key) => ['info' => $key], array_keys(apcu_stub_load()))];
     }
 }
