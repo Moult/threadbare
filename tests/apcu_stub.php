@@ -1,0 +1,36 @@
+<?php
+// Stand-in for APCu when the extension is not loaded: a JSON file shared by all requests.
+if (!function_exists('apcu_fetch')) {
+    function apcu_stub_load()
+    {
+        $file = getenv('APCU_STUB_FILE');
+        return is_file($file) ? (json_decode(file_get_contents($file), TRUE) ?: []) : [];
+    }
+    function apcu_stub_save($data)
+    {
+        file_put_contents(getenv('APCU_STUB_FILE'), json_encode($data), LOCK_EX);
+    }
+    function apcu_fetch($key)
+    {
+        $data = apcu_stub_load();
+        return array_key_exists($key, $data) ? $data[$key] : FALSE;
+    }
+    function apcu_store($key, $value, $ttl = 0)
+    {
+        $data = apcu_stub_load();
+        $data[$key] = $value;
+        apcu_stub_save($data);
+        return TRUE;
+    }
+    function apcu_delete($key)
+    {
+        $data = apcu_stub_load();
+        unset($data[$key]);
+        apcu_stub_save($data);
+        return TRUE;
+    }
+    function apcu_cache_info()
+    {
+        return ['cache_list' => array_map(fn($key) => ['info' => $key], array_keys(apcu_stub_load()))];
+    }
+}
