@@ -1379,6 +1379,10 @@ function tryRenderFromCache($key): void
 
 function saveCache($key, string $html, int $ttl = 900): void
 {
+    // A full APCu empties itself, rate limits and all, so pages only take memory while a quarter is still free
+    $memory = apcu_sma_info(TRUE);
+    if ($memory['avail_mem'] < $memory['num_seg'] * $memory['seg_size'] / 4)
+        return;
     apcu_store($key, $html, $ttl);
 }
 
