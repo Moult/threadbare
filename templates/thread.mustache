@@ -4,12 +4,16 @@
 {{/can_edit}}
 <ol class="posts">
 {{#posts}}
-    <li class="post">
+    <li class="post{{#is_pending}} pending{{/is_pending}}">
         <a id="{{id}}"></a>
         <span class="avatar {{avatar}}">{{initial}}</span>
         <span class="metadata">
             by <a href="{{baseurl}}profile/{{user_id}}">{{username}}</a> on <strong>{{ts_created}}</strong>{{#ts_updated}}, edited <strong>{{ts_updated}}</strong>{{/ts_updated}}
             <a href="{{baseurl}}thread/{{thread_id}}/p{{page}}#{{id}}">#</a>
+            {{#is_pending}}
+            <strong>Awaiting approval:</strong> only its author and admins can see this post.
+            {{#is_admin}}<a href="{{baseurl}}approvals">Review</a>{{/is_admin}}
+            {{/is_pending}}
             {{#can_edit}}
             <a href="{{baseurl}}post/edit/{{id}}">edit</a>
             {{/can_edit}}
@@ -29,8 +33,8 @@
               <input type="hidden" name="csrf" value="{{csrf}}">
               <input type="hidden" name="post_id" value="{{id}}">
               <input type="hidden" name="page" value="{{page}}">
-              <button name="vote" value="1" {{#user_vote_is_upvoted}}disabled{{/user_vote_is_upvoted}}>&blacktriangle;</button>
-              <button name="vote" value="-1" {{#user_vote_is_downvoted}}disabled{{/user_vote_is_downvoted}}>&blacktriangledown;</button>
+              <button name="vote" value="1" aria-pressed="{{#user_vote_is_upvoted}}true{{/user_vote_is_upvoted}}{{^user_vote_is_upvoted}}false{{/user_vote_is_upvoted}}">&blacktriangle;</button>
+              <button name="vote" value="-1" aria-pressed="{{#user_vote_is_downvoted}}true{{/user_vote_is_downvoted}}{{^user_vote_is_downvoted}}false{{/user_vote_is_downvoted}}">&blacktriangledown;</button>
             </form>
             {{/can_vote}}
         </span>

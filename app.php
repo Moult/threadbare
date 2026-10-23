@@ -35,7 +35,7 @@ $perPage = 25;
 $db = new \PDO('sqlite:' . __DIR__ . '/threadbare.db');
 $db->exec('PRAGMA foreign_keys = ON;');
 $method = $_SERVER['REQUEST_METHOD'];
-$uri = trim($_SERVER['REQUEST_URI'], '/');
+$uri = trim(strtok($_SERVER['REQUEST_URI'], '?'), '/'); // Route on the path; ?utm_source= etc. must not 404
 $data = ['baseurl' => $baseurl, 'csrf' => $_SESSION['csrf'], 'captcha' => $config['hCaptchaSiteKey'], 'html_title' => $config['websiteTitle'], 'h1' => $config['websiteTitle'], 'blurb' => $config['blurb']];
 if (isset($_SESSION['username'])) {
     $data['is_logged_in'] = TRUE;
@@ -43,6 +43,15 @@ if (isset($_SESSION['username'])) {
     $data['user_id'] = $_SESSION['user_id'];
 } else {
     $data['is_logged_in'] = FALSE;
+}
+if (isAdmin($config)) {
+    $data['is_admin'] = TRUE;
+    $data['pending_count'] = (int) $db->query('SELECT COUNT(*) FROM posts WHERE is_approved = 0')->fetchColumn();
+}
+
+function isAdmin($config)
+{
+    return isset($_SESSION['username']) && in_array($_SESSION['username'], $config['adminUsernames']);
 }
 
 function generateCsrf(&$data)
@@ -123,18 +132,18 @@ function regenerateSessionToken($db, $userId)
         $_SESSION['token'] = $token;
 }
 
+// Returns FALSE unless hCaptcha confirms the response, including when it can't be reached
 function checkCaptcha($config)
 {
-    $data = ['secret' => $config['hCaptchaSecretKey'], 'response' => $_POST['h-captcha-response']];
+    $request = ['secret' => $config['hCaptchaSecretKey'], 'response' => $_POST['h-captcha-response'] ?? ''];
     $verify = curl_init();
     curl_setopt($verify, CURLOPT_URL, 'https://hcaptcha.com/siteverify');
     curl_setopt($verify, CURLOPT_POST, true);
-    curl_setopt($verify, CURLOPT_POSTFIELDS, http_build_query($data));
+    curl_setopt($verify, CURLOPT_POSTFIELDS, http_build_query($request));
     curl_setopt($verify, CURLOPT_RETURNTRANSFER, true);
     $response = curl_exec($verify);
     $responseData = json_decode($response);
-    if (!$responseData->success)
-        render(403, '403', $data);
+    return !empty($responseData->success);
 }
 
 function validateLogin($db)
@@ -145,8 +154,10 @@ function validateLogin($db)
         $query->bindParam(':email', $_POST['username']);
         $query->execute();
         $row = $query->fetch();
-        if (!$row)
+        if (!$row) {
+            password_hash($_POST['password'], PASSWORD_DEFAULT); // As slow as a wrong password, so timing doesn't reveal which accounts exist
             return FALSE;
+        }
         if (password_verify($_POST['password'], $row['password']))
             return $row;
     }
@@ -164,7 +175,7 @@ function login($db, $user)
     }
 }
 
-function validateProfile($config, $baseurl)
+function validateProfile($config, $baseurl, $db, $userId)
 {
     $errors = [];
     if (!isset($_POST['email']) || !is_string($_POST['email']) || strlen($_POST['email']) < 3 || strlen($_POST['email']) > 50) {
@@ -175,6 +186,8 @@ function validateProfile($config, $baseurl)
         $_POST['email'] = $email;
         if (!filter_var($email, FILTER_VALIDATE_EMAIL)) {
             $errors[] = 'Email is not valid.';
+        } else if (isEmailTaken($db, $email, $userId)) {
+            $errors[] = 'Email is already in use.';
         }
     }
     if (!isset($_POST['bio']) || !is_string($_POST['bio']) || strlen($_POST['bio']) > 500) {
@@ -190,8 +203,8 @@ function validatePassword()
     $errors = [];
     $fields = ['password', 'password2'];
     foreach ($fields as $field) {
-        if (!isset($_POST[$field]) || !is_string($_POST[$field]) || strlen($_POST[$field]) < 3 || strlen($_POST[$field]) > 50) {
-            $errors[] = ucfirst(trim($field, '2')) . ' needs to be at least 3-50 characters long.';
+        if (!isset($_POST[$field]) || !is_string($_POST[$field]) || strlen($_POST[$field]) < 8 || strlen($_POST[$field]) > 50) {
+            $errors[] = ucfirst(trim($field, '2')) . ' needs to be 8-50 characters long.';
         }
     }
     if (isset($_POST['password']) && isset($_POST['password2']) && $_POST['password'] !== $_POST['password2']) {
@@ -205,8 +218,9 @@ function validateRegistration($config, $db)
     $errors = [];
     $fields = ['username', 'password', 'password2', 'email', 'answer'];
     foreach ($fields as $field) {
-        if (!isset($_POST[$field]) || !is_string($_POST[$field]) || strlen($_POST[$field]) < 3 || strlen($_POST[$field]) > 50) {
-            $errors[] = ucfirst(trim($field, '2')) . ' needs to be at least 3-50 characters long.';
+        $min = in_array($field, ['password', 'password2']) ? 8 : 3;
+        if (!isset($_POST[$field]) || !is_string($_POST[$field]) || strlen($_POST[$field]) < $min || strlen($_POST[$field]) > 50) {
+            $errors[] = ucfirst(trim($field, '2')) . " needs to be $min-50 characters long.";
         }
         if (isset($_POST[$field])) {
             $_POST[$field] = str_replace(["\r", "\n"], '', $_POST[$field]);
@@ -214,9 +228,6 @@ function validateRegistration($config, $db)
     }
     if (isset($_POST['username']) && !preg_match('/^[a-zA-Z0-9_-]+$/', $_POST['username'])) {
         $errors[] = 'Username can only contain letters, numbers, underscores, and hyphens.';
-    }
-    if (preg_match('/\s{2,}/', $_POST['username']) || preg_match('/^\s|\s$/', $_POST['username'])) {
-        $errors[] = 'Username cannot have leading/trailing or multiple consecutive spaces.';
     }
     if (isset($_POST['password']) && isset($_POST['password2']) && $_POST['password'] !== $_POST['password2']) {
         $errors[] = 'Passwords do not match.';
@@ -232,7 +243,8 @@ function validateRegistration($config, $db)
         $errors[] = 'The answer is wrong.';
     }
     if (isset($_POST['username']) && isset($_POST['email'])) {
-        $query = $db->prepare('SELECT COUNT(id) FROM users WHERE username = :username OR email = :email');
+        // Usernames differing only in case would look alike and share @mentions
+        $query = $db->prepare('SELECT COUNT(id) FROM users WHERE LOWER(username) = LOWER(:username) OR email = :email');
         $query->bindParam(':username', $_POST['username']);
         $query->bindParam(':email', $_POST['email']);
         $query->execute();
@@ -245,6 +257,22 @@ function validateRegistration($config, $db)
 
 function deleteUser($db, $id)
 {
+    // Remove posts one by one so threads with other people's replies pass to them instead of cascading away
+    $query = $db->prepare('SELECT id, thread_id FROM posts WHERE user_id = :user_id');
+    $query->bindValue(':user_id', $id);
+    $query->execute();
+    foreach ($query->fetchAll() as $row) {
+        removePost($db, $row['id'], $row['thread_id']);
+    }
+
+    // Remove the user's uploaded files; their rows go with the user
+    $query = $db->prepare('SELECT path FROM uploads WHERE user_id = :user_id');
+    $query->bindValue(':user_id', $id);
+    $query->execute();
+    foreach ($query->fetchAll(PDO::FETCH_COLUMN, 0) as $path) {
+        @unlink(__DIR__ . '/uploads/' . $path);
+    }
+
     $query = $db->prepare('DELETE FROM users WHERE id = :id LIMIT 1');
     $query->bindValue(':id', $id);
     $query->execute();
@@ -269,16 +297,21 @@ function getUserByEmail($db, $email)
     return $query->fetch();
 }
 
-function generateVerification($db, $userId)
+// $purpose is 'verify', 'reset' or 'profile'; a code only works for its purpose, for a day
+function generateVerification($db, $userId, $purpose)
 {
-    $query = $db->prepare('DELETE FROM verifications WHERE user_id = :user_id');
+    // Replace only a code for the same purpose: asking for, say, a verification email mustn't cancel a reset link
+    $query = $db->prepare('DELETE FROM verifications WHERE user_id = :user_id AND purpose = :purpose');
     $query->bindValue(':user_id', $userId);
+    $query->bindValue(':purpose', $purpose);
     $query->execute();
 
     $code = bin2hex(random_bytes(32));
-    $query = $db->prepare('INSERT INTO verifications(code, user_id) VALUES(:code, :user_id)');
+    $query = $db->prepare('INSERT INTO verifications(code, user_id, purpose, ts_created) VALUES(:code, :user_id, :purpose, :ts_created)');
     $query->bindValue(':code', $code);
     $query->bindValue(':user_id', $userId);
+    $query->bindValue(':purpose', $purpose);
+    $query->bindValue(':ts_created', time());
     $query->execute();
     return $code;
 }
@@ -302,7 +335,6 @@ function sendEmail($config, $to, $subject, $content)
         ];
         curl_setopt($ch, CURLOPT_POSTFIELDS, json_encode($data));
         $response = curl_exec($ch);
-        curl_close($ch);
         return (curl_getinfo($ch, CURLINFO_HTTP_CODE) === 202);
     } catch (Exception $e) {
         return FALSE;
@@ -336,7 +368,16 @@ function sendProfileEmail($config, $email, $code)
     return sendEmail($config, $to, 'Edit ' . $config['websiteTitle'] . ' Profile', $content);
 }
 
-function sendNotificationEmails($config, $db, $threadId)
+function sendEmailChangeEmail($config, $email, $code)
+{
+    $email = filter_var($email, FILTER_SANITIZE_EMAIL);
+    $url = $config['baseurl'] . 'email/' . $code;
+    $content = "To use this address for your account, click the link below. If this wasn't you, ignore this email.\n\n" . $url;
+    $to = [["to" => [["email" => $email]]]];
+    return sendEmail($config, $to, 'Confirm your ' . $config['websiteTitle'] . ' email', $content);
+}
+
+function sendNotificationEmails($config, $db, $threadId, $userId, $poster, $postContent)
 {
     $emails = [];
     $query = $db->prepare('SELECT title FROM threads WHERE id = :id LIMIT 1');
@@ -345,12 +386,12 @@ function sendNotificationEmails($config, $db, $threadId)
     $title = $query->fetchColumn(0);
 
     $query = $db->prepare('SELECT email FROM users WHERE id = :user_id LIMIT 1');
-    $query->bindValue(':user_id', $_SESSION['user_id']);
+    $query->bindValue(':user_id', $userId);
     $query->execute();
     $myEmail = $query->fetchColumn(0);
 
     // Mentions
-    preg_match_all('/@([a-zA-Z0-9_-]{1,50})/', $_POST['content'], $matches);
+    preg_match_all('/@([a-zA-Z0-9_-]{1,50})/', $postContent, $matches);
     if (!empty($matches[1])) {
         $usernames = array_unique($matches[1]);
         foreach ($usernames as $username) {
@@ -366,7 +407,7 @@ function sendNotificationEmails($config, $db, $threadId)
     }
 
     // Those in thread
-    $query = $db->prepare('SELECT DISTINCT u.email FROM posts AS p LEFT JOIN users AS u ON p.user_id = u.id WHERE p.thread_id = :thread_id AND u.notifications = 1');
+    $query = $db->prepare('SELECT DISTINCT u.email FROM posts AS p LEFT JOIN users AS u ON p.user_id = u.id WHERE p.thread_id = :thread_id AND p.is_approved = 1 AND u.notifications = 1');
     $query->bindValue(':thread_id', $threadId);
     $query->execute();
     $rawEmails = $query->fetchAll(PDO::FETCH_COLUMN, 0);
@@ -383,10 +424,10 @@ function sendNotificationEmails($config, $db, $threadId)
     $url = $config['baseurl'] . 'thread/' . $threadId . '/latest';
     $url2 = $config['baseurl'] . 'notifications';
     $title = preg_replace('/[\x00-\x1F\x7F]/u', '', $title);
-    $username = preg_replace('/[\x00-\x1F\x7F]/u', '', $_SESSION['username']);
-    $content = $username . ' has posted on the thread "' . $title . '". Check it out!' . "\n\n" . $url;
+    $poster = preg_replace('/[\x00-\x1F\x7F]/u', '', $poster);
+    $content = $poster . ' has posted on the thread "' . $title . '". Check it out!' . "\n\n" . $url;
     $content .= "\n\n" . "If you don't want notifications, sign in then visit this page:" . "\n\n" . $url2;
-    $subject = '[' . $config['websiteTitle'] . '] ' . $_SESSION['username'] . ' commented on ' . $title;
+    $subject = '[' . $config['websiteTitle'] . '] ' . $poster . ' commented on ' . $title;
     $to = [];
     foreach (array_unique($emails) as $email) {
         $to[] = ["to" => [["email" => $email]]];
@@ -394,7 +435,7 @@ function sendNotificationEmails($config, $db, $threadId)
     return sendEmail($config, $to, $subject, $content);
 }
 
-function checkVerificationCode($config, $db, $code)
+function checkVerificationCode($config, $db, $code, $purpose)
 {
     if (isset($_SESSION['user_id']) && in_array($_SESSION['username'], $config['adminUsernames'])) {
         $query = $db->prepare('SELECT id FROM users WHERE username = :code LIMIT 1');
@@ -405,8 +446,10 @@ function checkVerificationCode($config, $db, $code)
             return FALSE;
         return $userId;
     }
-    $query = $db->prepare('SELECT user_id FROM verifications WHERE code = :code LIMIT 1');
+    $query = $db->prepare('SELECT user_id FROM verifications WHERE code = :code AND purpose = :purpose AND ts_created > :since LIMIT 1');
     $query->bindValue(':code', $code);
+    $query->bindValue(':purpose', $purpose);
+    $query->bindValue(':since', time() - 86400);
     $query->execute();
     $userId = $query->fetchColumn(0);
     if (!$userId)
@@ -414,17 +457,54 @@ function checkVerificationCode($config, $db, $code)
     return $userId;
 }
 
+function isEmailTaken($db, $email, $userId)
+{
+    $query = $db->prepare('SELECT COUNT(id) FROM users WHERE email = :email AND id != :id');
+    $query->bindValue(':email', $email);
+    $query->bindValue(':id', $userId);
+    $query->execute();
+    return $query->fetchColumn() > 0;
+}
+
+// Saves the bio. A changed email is only held as pending; returns the code to confirm it, or NULL if unchanged.
 function updateProfile($db, $id)
 {
-    $query = $db->prepare('UPDATE users SET email = :email, bio = :bio WHERE id = :id LIMIT 1');
+    $query = $db->prepare('UPDATE users SET bio = :bio WHERE id = :id LIMIT 1');
     $query->bindValue(':id', $id);
-    $query->bindValue(':email', $_POST['email']);
     $query->bindValue(':bio', $_POST['bio']);
     $query->execute();
 
     $query = $db->prepare('DELETE FROM verifications WHERE user_id = :user_id');
     $query->bindValue(':user_id', $id);
     $query->execute();
+
+    $query = $db->prepare('SELECT email FROM users WHERE id = :id LIMIT 1');
+    $query->bindValue(':id', $id);
+    $query->execute();
+    $code = $query->fetchColumn() === $_POST['email'] ? NULL : bin2hex(random_bytes(32));
+    $query = $db->prepare('UPDATE users SET pending_email = :email, pending_email_code = :code, pending_email_ts = :ts WHERE id = :id LIMIT 1');
+    $query->bindValue(':id', $id);
+    $query->bindValue(':email', $code ? $_POST['email'] : NULL); // Unchanged email cancels any pending change
+    $query->bindValue(':code', $code);
+    $query->bindValue(':ts', $code ? time() : NULL);
+    $query->execute();
+    return $code;
+}
+
+function confirmEmail($db, $code)
+{
+    $query = $db->prepare('SELECT id, pending_email FROM users WHERE pending_email_code = :code AND pending_email_ts > :since LIMIT 1');
+    $query->bindValue(':code', $code);
+    $query->bindValue(':since', time() - 86400); // Like other emailed codes, it works for a day
+    $query->execute();
+    $row = $query->fetch();
+    if (!$row || isEmailTaken($db, $row['pending_email'], $row['id']))
+        return FALSE;
+
+    $query = $db->prepare('UPDATE users SET email = pending_email, pending_email = NULL, pending_email_code = NULL WHERE id = :id LIMIT 1');
+    $query->bindValue(':id', $row['id']);
+    $query->execute();
+    return TRUE;
 }
 
 function updatePassword($db, $id)
@@ -450,6 +530,7 @@ function updatePost($db, $id)
 
 function movePost($db, $id, $threadId)
 {
+    $oldThreadId = getThreadId($db, $id);
     $query = $db->prepare('SELECT id FROM threads WHERE id = :thread_id LIMIT 1');
     $query->bindValue(':thread_id', $threadId);
     $query->execute();
@@ -463,10 +544,11 @@ function movePost($db, $id, $threadId)
     $query->bindValue(':thread_id', $threadId);
     $query->execute();
 
+    // The thread goes to the first approved poster: a held post's author mustn't get it
     $query = $db->prepare('
         SELECT
-            (SELECT user_id FROM posts WHERE thread_id = :thread_id ORDER BY id ASC LIMIT 1) AS first_user_id,
-            (SELECT user_id FROM posts WHERE thread_id = :thread_id ORDER BY id DESC LIMIT 1) AS last_user_id
+            (SELECT user_id FROM posts WHERE thread_id = :thread_id ORDER BY is_approved DESC, id ASC LIMIT 1) AS first_user_id,
+            (SELECT user_id FROM posts WHERE thread_id = :thread_id AND is_approved = 1 ORDER BY id DESC LIMIT 1) AS last_user_id
     ');
     $query->bindValue(':thread_id', $threadId, PDO::PARAM_INT);
     $query->execute();
@@ -476,6 +558,11 @@ function movePost($db, $id, $threadId)
     $query->bindValue(':thread_id', $threadId, PDO::PARAM_INT);
     $query->bindValue(':user_id', $row['first_user_id'], PDO::PARAM_INT);
     $query->bindValue(':last_user_id', $row['last_user_id'], PDO::PARAM_INT);
+    $query->execute();
+
+    // Don't leave the old thread behind with no posts
+    $query = $db->prepare('DELETE FROM threads WHERE id = :id AND NOT EXISTS (SELECT 1 FROM posts WHERE thread_id = :id)');
+    $query->bindValue(':id', $oldThreadId);
     $query->execute();
 }
 
@@ -490,8 +577,10 @@ function updateThread($db, $id)
 
 function verifyUser($db, $code)
 {
-    $query = $db->prepare('SELECT user_id FROM verifications WHERE code = :code LIMIT 1');
+    $query = $db->prepare('SELECT user_id FROM verifications WHERE code = :code AND purpose = :purpose AND ts_created > :since LIMIT 1');
     $query->bindValue(':code', $code);
+    $query->bindValue(':purpose', 'verify');
+    $query->bindValue(':since', time() - 86400);
     $query->execute();
     $userId = $query->fetchColumn(0);
     if (!$userId)
@@ -548,16 +637,19 @@ function addThread($db)
     return $db->lastInsertId();
 }
 
-function addPost($db, $threadId)
+function addPost($db, $threadId, $isApproved)
 {
-    $query = $db->prepare('INSERT INTO posts(thread_id, user_id, content, ts_created, ts_updated) VALUES(:thread_id, :user_id, :content, :ts_created, :ts_updated)');
+    $query = $db->prepare('INSERT INTO posts(thread_id, user_id, content, ts_created, ts_updated, is_approved) VALUES(:thread_id, :user_id, :content, :ts_created, :ts_updated, :is_approved)');
     $query->bindValue(':thread_id', $threadId);
     $query->bindValue(':user_id', $_SESSION['user_id']);
     $query->bindValue(':content', $_POST['content']);
     $query->bindValue(':ts_created', time());
     $query->bindValue(':ts_updated', time());
+    $query->bindValue(':is_approved', $isApproved ? 1 : 0, PDO::PARAM_INT);
     $query->execute();
     $postId = $db->lastInsertId();
+    if (!$isApproved)
+        return $postId; // A held post doesn't bump the thread until it's approved
 
     $query = $db->prepare('UPDATE threads SET last_user_id = :user_id, ts_updated = :ts_updated WHERE id = :thread_id');
     $query->bindValue(':thread_id', $threadId);
@@ -565,6 +657,91 @@ function addPost($db, $threadId)
     $query->bindValue(':ts_updated', time());
     $query->execute();
     return $postId;
+}
+
+// Admins, trusted users and users an admin has approved post straight away; everyone else's posts are held
+function isApproved($config, $db)
+{
+    if (isAdmin($config) || in_array($_SESSION['username'], $config['trustedUsernames']))
+        return TRUE;
+    $query = $db->prepare('SELECT is_approved FROM users WHERE id = :id LIMIT 1');
+    $query->bindValue(':id', $_SESSION['user_id']);
+    $query->execute();
+    return (bool) $query->fetchColumn();
+}
+
+// Tells the admins when a user's first post is held, rather than for every post after it
+function sendApprovalRequestEmail($config, $db)
+{
+    $query = $db->prepare('SELECT COUNT(*) FROM posts WHERE user_id = :user_id AND is_approved = 0');
+    $query->bindValue(':user_id', $_SESSION['user_id']);
+    $query->execute();
+    if ($query->fetchColumn() !== 1 || !$config['adminUsernames'])
+        return;
+
+    $query = $db->prepare('SELECT email FROM users WHERE username IN (' . implode(',', array_fill(0, count($config['adminUsernames']), '?')) . ')');
+    $query->execute(array_values($config['adminUsernames']));
+    $to = [];
+    foreach ($query->fetchAll(PDO::FETCH_COLUMN, 0) as $email) {
+        $to[] = ["to" => [["email" => $email]]];
+    }
+    if (!$to)
+        return;
+    $username = preg_replace('/[\x00-\x1F\x7F]/u', '', $_SESSION['username']);
+    $content = $username . " has posted for the first time. Their posts are hidden until an admin approves them:\n\n" . $config['baseurl'] . 'approvals';
+    return sendEmail($config, $to, '[' . $config['websiteTitle'] . '] ' . $username . ' is awaiting approval', $content);
+}
+
+// Approves a user and publishes their held posts, bumping those threads and sending the notifications held back with them
+function approveUser($config, $db, $userId)
+{
+    $query = $db->prepare('SELECT username FROM users WHERE id = :id LIMIT 1');
+    $query->bindValue(':id', $userId);
+    $query->execute();
+    $username = $query->fetchColumn();
+    if (!$username)
+        return;
+
+    $query = $db->prepare('SELECT thread_id, content FROM posts WHERE user_id = :user_id AND is_approved = 0 ORDER BY id ASC');
+    $query->bindValue(':user_id', $userId);
+    $query->execute();
+    $posts = $query->fetchAll(PDO::FETCH_ASSOC);
+
+    $query = $db->prepare('UPDATE users SET is_approved = 1 WHERE id = :id LIMIT 1');
+    $query->bindValue(':id', $userId);
+    $query->execute();
+    $query = $db->prepare('UPDATE posts SET is_approved = 1 WHERE user_id = :user_id AND is_approved = 0');
+    $query->bindValue(':user_id', $userId);
+    $query->execute();
+
+    foreach (array_unique(array_column($posts, 'thread_id')) as $threadId) {
+        $query = $db->prepare('UPDATE threads SET ts_updated = :ts_updated,
+            last_user_id = (SELECT user_id FROM posts WHERE thread_id = :thread_id AND is_approved = 1 ORDER BY id DESC LIMIT 1)
+            WHERE id = :thread_id');
+        $query->bindValue(':thread_id', $threadId, PDO::PARAM_INT);
+        $query->bindValue(':ts_updated', time());
+        $query->execute();
+    }
+    foreach ($posts as $post) {
+        sendNotificationEmails($config, $db, $post['thread_id'], $userId, $username, $post['content']);
+    }
+}
+
+function getPendingPosts($db)
+{
+    $query = $db->query('
+        SELECT p.id, p.content, p.thread_id, p.user_id, p.ts_created, u.username, u.email, t.title
+        FROM posts AS p
+        JOIN users AS u ON p.user_id = u.id
+        JOIN threads AS t ON p.thread_id = t.id
+        WHERE p.is_approved = 0
+        ORDER BY p.id ASC');
+    $results = [];
+    while ($row = $query->fetch(PDO::FETCH_ASSOC)) {
+        $row['ts_created'] = date('j M Y H:i', $row['ts_created']);
+        $results[] = $row;
+    }
+    return $results;
 }
 
 function addVote($db, $postId, $vote)
@@ -609,7 +786,7 @@ function getLatestPosts($db, $userId, $perPage = 20)
         FROM posts AS p
         LEFT JOIN threads AS t ON p.thread_id = t.id
         LEFT JOIN users AS u ON t.user_id = u.id
-        WHERE p.user_id = :user_id
+        WHERE p.user_id = :user_id AND p.is_approved = 1
         GROUP BY p.id ORDER BY p.id DESC
         LIMIT :limit
     ');
@@ -650,15 +827,15 @@ function getThreads($db, $page = 1, $perPage = 20, $tag = NULL)
         FROM threads AS t
         LEFT JOIN users AS u ON t.user_id = u.id
         LEFT JOIN users AS lu ON t.last_user_id = lu.id
-        LEFT JOIN posts AS p ON p.thread_id = t.id
+        LEFT JOIN posts AS p ON p.thread_id = t.id AND p.is_approved = 1
         LEFT JOIN thread_reads AS r ON r.thread_id = t.id AND r.user_id = :user_id';
     if ($tag !== NULL) {
-        $sql .= ' WHERE t.tags LIKE :tag';
+        $sql .= " WHERE ',' || t.tags || ',' LIKE :tag"; // Whole tags only: intro must not match introduction
     }
-    $sql .= ' GROUP BY t.id ORDER BY t.ts_updated DESC LIMIT :limit OFFSET :offset';
+    $sql .= ' GROUP BY t.id HAVING count(p.id) > 0 ORDER BY t.ts_updated DESC LIMIT :limit OFFSET :offset'; // A held new thread has no approved posts
     $query = $db->prepare($sql);
     if ($tag !== NULL) {
-        $query->bindValue(':tag', '%' . $tag . '%', PDO::PARAM_STR);
+        $query->bindValue(':tag', '%,' . $tag . ',%', PDO::PARAM_STR);
     }
     $query->bindValue(':limit', $perPage, PDO::PARAM_INT);
     $query->bindValue(':offset', ($page - 1) * $perPage, PDO::PARAM_INT);
@@ -691,18 +868,22 @@ function getThreads($db, $page = 1, $perPage = 20, $tag = NULL)
 
 function getTotalThreads($db, $tag = NULL)
 {
+    $approved = 'EXISTS (SELECT 1 FROM posts WHERE thread_id = threads.id AND is_approved = 1)';
     if ($tag === NULL)
-        return (int) $db->query('SELECT COUNT(*) FROM threads')->fetchColumn();
-    $query = $db->prepare('SELECT COUNT(*) FROM threads WHERE tags LIKE :tag');
-    $query->bindValue(':tag', '%' . $tag . '%', PDO::PARAM_STR);
+        return (int) $db->query("SELECT COUNT(*) FROM threads WHERE $approved")->fetchColumn();
+    $query = $db->prepare("SELECT COUNT(*) FROM threads WHERE ',' || tags || ',' LIKE :tag AND $approved");
+    $query->bindValue(':tag', '%,' . $tag . ',%', PDO::PARAM_STR);
     $query->execute();
     return (int) $query->fetchColumn();
 }
 
-function getTotalPosts($db, int $threadId): int
+// Posts in a thread that the viewer can see: held posts only by their author and admins
+function getTotalPosts($config, $db, int $threadId): int
 {
-    $query = $db->prepare('SELECT COUNT(*) FROM posts WHERE thread_id = :thread_id');
+    $query = $db->prepare('SELECT COUNT(*) FROM posts WHERE thread_id = :thread_id AND (is_approved = 1 OR user_id = :user_id OR :is_admin = 1)');
     $query->bindValue(':thread_id', $threadId);
+    $query->bindValue(':user_id', $_SESSION['user_id'] ?? 0);
+    $query->bindValue(':is_admin', isAdmin($config) ? 1 : 0, PDO::PARAM_INT);
     $query->execute();
     return $query->fetchColumn(0);
 }
@@ -776,7 +957,7 @@ function getThread($config, $db, $threadId, $page, $perPage, &$data)
     $query->bindValue(':id', $threadId);
     $query->execute();
     $row = $query->fetch();
-    if (!$row)
+    if (!$row || getTotalPosts($config, $db, $threadId) === 0)
         render(404, '404', $data);
     $data['title'] = $row['title'];
     $data['tags'] = explode(',', $row['tags']);
@@ -788,20 +969,21 @@ function getThread($config, $db, $threadId, $page, $perPage, &$data)
     $data['posts'] = [];
 
     $query = $db->prepare('
-        SELECT p.id, p.content, p.thread_id, p.user_id, u.username, u.email, p.ts_created, p.ts_updated,
+        SELECT p.id, p.content, p.thread_id, p.user_id, u.username, u.email, p.ts_created, p.ts_updated, p.is_approved,
             SUM(CASE WHEN v.value = 1 THEN 1 ELSE 0 END) AS upvotes,
             SUM(CASE WHEN v.value = -1 THEN 1 ELSE 0 END) AS downvotes,
             MAX(CASE WHEN v.user_id = :user_id THEN v.value ELSE NULL END) AS user_vote
         FROM posts AS p
         LEFT JOIN users AS u ON p.user_id = u.id
         LEFT JOIN votes AS v ON p.id = v.post_id
-        WHERE p.thread_id = :id
+        WHERE p.thread_id = :id AND (p.is_approved = 1 OR p.user_id = :user_id OR :is_admin = 1)
         GROUP BY p.id
         ORDER BY p.id ASC
         LIMIT :limit OFFSET :offset
     ');
     $query->bindValue(':id', $threadId);
     $query->bindValue(':user_id', $_SESSION['user_id'] ?? 0);
+    $query->bindValue(':is_admin', isAdmin($config) ? 1 : 0, PDO::PARAM_INT);
     $query->bindValue(':limit', $perPage, PDO::PARAM_INT);
     $query->bindValue(':offset', ($page - 1) * $perPage, PDO::PARAM_INT);
     $query->execute();
@@ -812,10 +994,13 @@ function getThread($config, $db, $threadId, $page, $perPage, &$data)
         $content = preProcessMentions($content);
         $content = $Parsedown->text($content);
         $content = postProcessMentions($content);
-        $row['can_vote'] = !empty($_SESSION['user_id']) && $_SESSION['user_id'] !== $row['user_id'];
+        $row['can_vote'] = !empty($_SESSION['user_id']) && $_SESSION['user_id'] !== $row['user_id'] && $row['is_approved'];
         $row['has_votes'] = $row['upvotes'] || $row['downvotes'];
+        $row['is_pending'] = !$row['is_approved'];
         $row['rabbits'] = str_repeat('🐇', max(0, $row['upvotes'] - $row['downvotes']));
         $row['user_upvote'] = $row['user_vote'] === 1;
+        $row['user_vote_is_upvoted'] = $row['user_vote'] === 1;
+        $row['user_vote_is_downvoted'] = $row['user_vote'] === -1;
         $row['user_vote'] = $row['user_vote'] !== NULL;
         $row['ts_updated'] = $row['ts_updated'] > $row['ts_created'] + 5 ? date('j M Y', $row['ts_updated']) : '';
         $row['ts_created'] = date('j M Y', $row['ts_created']);
@@ -868,22 +1053,27 @@ function deletePost($config, $db, $id)
 
     if (!$threadId)
         return;
+    removePost($db, $id, $threadId);
+}
 
+// Delete a post, then hand its thread to the first remaining poster, or delete the thread if it is now empty
+function removePost($db, $id, $threadId)
+{
     $query = $db->prepare('DELETE FROM posts WHERE id = :id LIMIT 1');
     $query->bindValue(':id', $id);
     $query->execute();
-    $query->fetch();
 
+    // The thread goes to the first approved poster: a held post's author mustn't get it
     $query = $db->prepare('
         SELECT
-            (SELECT user_id FROM posts WHERE thread_id = :thread_id ORDER BY id ASC LIMIT 1) AS first_user_id,
-            (SELECT user_id FROM posts WHERE thread_id = :thread_id ORDER BY id DESC LIMIT 1) AS last_user_id
+            (SELECT user_id FROM posts WHERE thread_id = :thread_id ORDER BY is_approved DESC, id ASC LIMIT 1) AS first_user_id,
+            (SELECT user_id FROM posts WHERE thread_id = :thread_id AND is_approved = 1 ORDER BY id DESC LIMIT 1) AS last_user_id
     ');
     $query->bindValue(':thread_id', $threadId, PDO::PARAM_INT);
     $query->execute();
     $row = $query->fetch(PDO::FETCH_ASSOC);
 
-    if ($row['first_user_id'] && $row['last_user_id']) {
+    if ($row['first_user_id']) { // Kept even if only held posts remain, as those may yet be approved
         $query = $db->prepare('UPDATE threads SET user_id = :user_id, last_user_id = :last_user_id WHERE id = :thread_id LIMIT 1');
         $query->bindValue(':thread_id', $threadId, PDO::PARAM_INT);
         $query->bindValue(':user_id', $row['first_user_id'], PDO::PARAM_INT);
@@ -901,14 +1091,17 @@ function deleteThread($config, $db, $id)
     if (in_array($_SESSION['username'], $config['adminUsernames'])) {
         $query = $db->prepare('DELETE FROM threads WHERE id = :id LIMIT 1');
     } else {
-        $query = $db->prepare('DELETE FROM threads WHERE id = :id AND user_id = :user_id LIMIT 1');
+        // Authors may only delete threads nobody else has replied to
+        $query = $db->prepare('DELETE FROM threads WHERE id = :id AND user_id = :user_id
+            AND NOT EXISTS (SELECT 1 FROM posts WHERE thread_id = :id AND user_id != :user_id) LIMIT 1');
         $query->bindValue(':user_id', $_SESSION['user_id']);
     }
     $query->bindValue(':id', $id);
     $query->execute();
+    return $query->rowCount() > 0;
 }
 
-function handleUpload($config, $db)
+function handleUpload($config, $db, $data)
 {
     if (!isset($_FILES['attachment']) || $_FILES['attachment']['error'] !== UPLOAD_ERR_OK)
         render(400, '400', $data);
@@ -916,7 +1109,7 @@ function handleUpload($config, $db)
     $file = $_FILES['attachment'];
 
     if ($file['size'] > $config['maxUploadMb'] * 1024 * 1024) {
-        die('File too large.');
+        render(400, '400', $data);
     }
 
     $allowedTypes = [
@@ -954,13 +1147,20 @@ function handleUpload($config, $db)
     }
     if (!move_uploaded_file($file['tmp_name'], $uploadDir . DIRECTORY_SEPARATOR . $filename))
         render(500, '500', $data);
+
+    $query = $db->prepare('INSERT INTO uploads(path, user_id, ts_created) VALUES(:path, :user_id, :ts_created)');
+    $query->bindValue(':path', $subdir . '/' . $filename);
+    $query->bindValue(':user_id', $_SESSION['user_id']);
+    $query->bindValue(':ts_created', time());
+    $query->execute();
     return $subdir . '/' . $filename;
 }
 
 function recordThreadView($db, $threadId)
 {
     $key = "viewed_thread_$threadId";
-    if (!isset($_SESSION[$key])) {
+    // Only count clients that send the session cookie back: one that never does (most bots) would be a new view, and a write, on every request
+    if (!isset($_SESSION[$key]) && isset($_COOKIE[session_name()])) {
         $_SESSION[$key] = true;
         $query = $db->prepare('UPDATE threads SET views = views + 1 WHERE id = ?');
         $query->execute([$threadId]);
@@ -992,8 +1192,8 @@ function isSpam($config, $baseurl, $content)
     $request = 'api_key=' . urlencode($config['akismetKey'])
         . '&blog=' . urlencode($baseurl)
         . '&user_ip=' . urlencode($_SERVER['REMOTE_ADDR'])
-        . '&user_agent=' . urlencode($_SERVER['HTTP_USER_AGENT'])
-        . '&referrer=' . urlencode($_SERVER['HTTP_REFERER'])
+        . '&user_agent=' . urlencode($_SERVER['HTTP_USER_AGENT'] ?? '')
+        . '&referrer=' . urlencode($_SERVER['HTTP_REFERER'] ?? '')
         . '&comment_type=comment'
         . '&comment_author=' . urlencode($_SESSION['username'])
         . '&comment_content=' . urlencode($content);
@@ -1020,7 +1220,7 @@ function isSpam($config, $baseurl, $content)
         fclose($fs);
         $response = explode("\r\n\r\n", $response, 2);
     }
-    if ('true' === $response[1])
+    if ('true' === ($response[1] ?? '')) // Unset when Akismet couldn't be reached
         return true;
     return false;
 }
@@ -1029,7 +1229,7 @@ function tryRenderFromCache($key): void
 {
     if (!empty($_SESSION['user_id']))
         return;
-    $html = apcu_fetch('html_' . $key . '_' . sha1($_SERVER['REQUEST_URI']));
+    $html = apcu_fetch('html_' . $key . '_' . sha1(strtok($_SERVER['REQUEST_URI'], '?')));
     if ($html !== false) {
         echo $html;
         exit;
@@ -1038,7 +1238,7 @@ function tryRenderFromCache($key): void
 
 function saveCache($key, string $html, int $ttl = 900): void
 {
-    apcu_store('html_' . $key . '_' . sha1($_SERVER['REQUEST_URI']), $html, $ttl);
+    apcu_store('html_' . $key . '_' . sha1(strtok($_SERVER['REQUEST_URI'], '?')), $html, $ttl);
 }
 
 function invalidateCache($keys)
@@ -1168,6 +1368,14 @@ class ForumMarkdown extends Parsedown
 generateCsrf($data);
 checkSessionToken($baseurl, $db);
 
+// Fields are strings, except the tags[] checkboxes; anything else would hit a TypeError (500) further on
+foreach ([$_GET, $_POST] as $fields) {
+    foreach ($fields as $name => $value) {
+        if ($name === 'tags' ? !is_array($value) : !is_string($value))
+            render(400, '400', $data);
+    }
+}
+
 $queryString = [];
 if ($method === 'GET' && preg_match('/^(p[0-9]{1,3})?$/', $uri, $queryString)) {
     tryRenderFromCache('index');
@@ -1208,11 +1416,12 @@ if ($method === 'GET' && preg_match('/^(p[0-9]{1,3})?$/', $uri, $queryString)) {
 } else if ($method === 'POST' && $uri === 'register') {
     checkCsrf($data);
     checkRateLimit($config, $data, 'register', 5, 300);
-    checkCaptcha($config);
+    if (checkCaptcha($config) === FALSE)
+        render(403, '403', $data);
     $data['errors'] = validateRegistration($config, $db);
     if (count($data['errors']) === 0) {
         $userId = addUser($db);
-        $code = generateVerification($db, $userId);
+        $code = generateVerification($db, $userId, 'verify');
         if (sendVerificationEmail($config, $_POST['email'], $code) === FALSE)
             render(500, '500', $data);
         $data['is_sent'] = TRUE;
@@ -1229,10 +1438,11 @@ if ($method === 'GET' && preg_match('/^(p[0-9]{1,3})?$/', $uri, $queryString)) {
 } else if ($method === 'POST' && $uri === 'reset') {
     checkCsrf($data);
     checkRateLimit($config, $data, 'reset', 3, 300);
-    checkCaptcha($config);
+    if (checkCaptcha($config) === FALSE)
+        render(403, '403', $data);
     $user = getUserByEmail($db, empty($_POST['email']) ? '' : $_POST['email']);
     if ($user) {
-        $code = generateVerification($db, $user['id']);
+        $code = generateVerification($db, $user['id'], 'reset');
         if (sendResetEmail($config, $user['email'], $code) === FALSE)
             render(500, '500', $data);
     }
@@ -1240,13 +1450,13 @@ if ($method === 'GET' && preg_match('/^(p[0-9]{1,3})?$/', $uri, $queryString)) {
     render(200, 'reset', $data);
 } else if ($method === 'GET' && preg_match('/^reset\/([A-Za-z0-9]{1,100})$/', $uri, $queryString)) {
     $data['code'] = $queryString[1];
-    $data['is_valid_code'] = (bool) checkVerificationCode($config, $db, $queryString[1]);
+    $data['is_valid_code'] = (bool) checkVerificationCode($config, $db, $queryString[1], 'reset');
     render(200, 'reset', $data);
 } else if ($method === 'POST' && preg_match('/^reset\/([A-Za-z0-9]{1,100})$/', $uri, $queryString)) {
     checkCsrf($data);
     checkRateLimit($config, $data, 'reset', 3, 300);
     $data['code'] = $queryString[1];
-    $userId = checkVerificationCode($config, $db, $queryString[1]);
+    $userId = checkVerificationCode($config, $db, $queryString[1], 'reset');
     $data['is_valid_code'] = (bool) $userId;
     if ($data['is_valid_code']) {
         $data['errors'] = validatePassword();
@@ -1262,10 +1472,11 @@ if ($method === 'GET' && preg_match('/^(p[0-9]{1,3})?$/', $uri, $queryString)) {
 } else if ($method === 'POST' && $uri === 'verify') {
     checkCsrf($data);
     checkRateLimit($config, $data, 'verify', 3, 300);
-    checkCaptcha($config);
+    if (checkCaptcha($config) === FALSE)
+        render(403, '403', $data);
     $user = getUserByEmail($db, empty($_POST['email']) ? '' : $_POST['email']);
     if ($user) {
-        $code = generateVerification($db, $user['id']);
+        $code = generateVerification($db, $user['id'], 'verify');
         if (sendVerificationEmail($config, $user['email'], $code) === FALSE)
             render(500, '500', $data);
     }
@@ -1275,23 +1486,28 @@ if ($method === 'GET' && preg_match('/^(p[0-9]{1,3})?$/', $uri, $queryString)) {
     $data['code'] = $queryString[1];
     $data['is_success'] = verifyUser($db, $queryString[1]);
     render(200, 'verify', $data);
+} else if ($method === 'GET' && preg_match('/^email\/([A-Za-z0-9]{1,100})$/', $uri, $queryString)) {
+    $data['is_success'] = confirmEmail($db, $queryString[1]);
+    render(200, 'email', $data);
 } else if ($method === 'GET' && preg_match('/^profile\/([0-9]{1,100})$/', $uri, $queryString)) {
     getProfile($db, $queryString[1], $data);
     $Parsedown = new ForumMarkdown();
     $Parsedown->setSafeMode(true);
     $data['bio'] = $Parsedown->text($data['bio']);
     $data['posts'] = getLatestPosts($db, $queryString[1], $perPage);
-    $data['can_edit'] = isset($_SESSION['user_id']) ? $queryString[1] === $_SESSION['user_id'] || in_array($_SESSION['username'], $config['adminUsernames']) : FALSE;
+    $data['can_edit'] = isset($_SESSION['user_id']) ? (int) $queryString[1] === (int) $_SESSION['user_id'] || in_array($_SESSION['username'], $config['adminUsernames']) : FALSE;
     render(200, 'profile', $data);
-} else if ($method === 'POST' && preg_match('/^profile\/delete\/([A-Za-z0-9]{1,100})$/', $uri, $queryString)) {
+} else if ($method === 'POST' && preg_match('/^profile\/delete\/([A-Za-z0-9_-]{1,100})$/', $uri, $queryString)) {
     if (!$data['is_logged_in'])
         redirect($baseurl . 'login');
     checkCsrf($data);
-    $userId = checkVerificationCode($config, $db, $queryString[1]);
+    $userId = checkVerificationCode($config, $db, $queryString[1], 'profile');
     $data['is_valid_code'] = (bool) $userId;
     if ($data['is_valid_code'] && !empty($_POST['confirm'])) {
         deleteUser($db, $userId);
-        logout();
+        invalidateCache(['index', 'thread/']);
+        if ((int) $userId === (int) $_SESSION['user_id']) // An admin deleting someone else stays logged in
+            logout();
         redirect($baseurl);
     }
     render(403, '403', $data);
@@ -1306,37 +1522,42 @@ if ($method === 'GET' && preg_match('/^(p[0-9]{1,3})?$/', $uri, $queryString)) {
     checkRateLimit($config, $data, 'profileedit', 3, 300);
     $user = getUserByEmail($db, empty($_POST['email']) ? '' : $_POST['email']);
     if ($user) {
-        $code = generateVerification($db, $user['id']);
+        $code = generateVerification($db, $user['id'], 'profile');
         if (sendProfileEmail($config, $user['email'], $code) === FALSE)
             render(500, '500', $data);
     }
     $data['is_sent'] = TRUE;
     render(200, 'profileedit', $data);
-} else if ($method === 'GET' && preg_match('/^profile\/edit\/([A-Za-z0-9]{1,100})$/', $uri, $queryString)) {
+} else if ($method === 'GET' && preg_match('/^profile\/edit\/([A-Za-z0-9_-]{1,100})$/', $uri, $queryString)) {
     if (!$data['is_logged_in'])
         redirect($baseurl . 'login');
     $data['code'] = $queryString[1];
-    $userId = checkVerificationCode($config, $db, $queryString[1]);
+    $userId = checkVerificationCode($config, $db, $queryString[1], 'profile');
     $data['is_valid_code'] = (bool) $userId;
     if ($data['is_valid_code']) {
         getProfile($db, $userId, $data);
     }
     render(200, 'profileedit', $data);
-} else if ($method === 'POST' && preg_match('/^profile\/edit\/([A-Za-z0-9]{1,100})$/', $uri, $queryString)) {
+} else if ($method === 'POST' && preg_match('/^profile\/edit\/([A-Za-z0-9_-]{1,100})$/', $uri, $queryString)) {
     if (!$data['is_logged_in'])
         redirect($baseurl . 'login');
     checkCsrf($data);
     checkRateLimit($config, $data, 'profileedit', 3, 300);
     $data['code'] = $queryString[1];
-    $userId = checkVerificationCode($config, $db, $queryString[1]);
+    $userId = checkVerificationCode($config, $db, $queryString[1], 'profile');
     $data['is_valid_code'] = (bool) $userId;
     if ($data['is_valid_code']) {
         $data['email'] = $_POST['email'];
         $data['bio'] = $_POST['bio'];
-        $data['errors'] = validateProfile($config, $baseurl);
+        $data['errors'] = validateProfile($config, $baseurl, $db, $userId);
         if (count($data['errors']) === 0) {
-            updateProfile($db, $userId);
+            $emailCode = updateProfile($db, $userId);
             regenerateSessionToken($db, $userId);
+            if ($emailCode) {
+                if (sendEmailChangeEmail($config, $_POST['email'], $emailCode) === FALSE)
+                    render(500, '500', $data);
+                $data['is_email_pending'] = TRUE;
+            }
             $data['is_success'] = TRUE;
         } else {
             $data['has_errors'] = TRUE;
@@ -1364,9 +1585,14 @@ if ($method === 'GET' && preg_match('/^(p[0-9]{1,3})?$/', $uri, $queryString)) {
     if (count($data['errors']) === 0) {
         checkRateLimit($config, $data, 'post-success', 5, 300);
         $threadId = addThread($db);
-        addPost($db, $threadId);
-        sendNotificationEmails($config, $db, $threadId);
-        invalidateCache(['index']);
+        if (isApproved($config, $db)) {
+            addPost($db, $threadId, TRUE);
+            sendNotificationEmails($config, $db, $threadId, $_SESSION['user_id'], $_SESSION['username'], $_POST['content']);
+            invalidateCache(['index']);
+        } else {
+            addPost($db, $threadId, FALSE);
+            sendApprovalRequestEmail($config, $db);
+        }
         redirect($baseurl . 'thread/' . $threadId);
     }
     $data['has_errors'] = TRUE;
@@ -1375,19 +1601,19 @@ if ($method === 'GET' && preg_match('/^(p[0-9]{1,3})?$/', $uri, $queryString)) {
     render(400, 'post', $data);
 } else if ($method === 'GET' && preg_match('/^thread\/([0-9]{1,50})\/latest$/', $uri, $queryString)) {
     $threadId = (int) $queryString[1];
-    $totalPages = ceil(getTotalPosts($db, $threadId) / $perPage);
+    $totalPages = ceil(getTotalPosts($config, $db, $threadId) / $perPage);
     redirect($baseurl . 'thread/' . $threadId . '/p' . $totalPages);
 } else if ($method === 'GET' && preg_match('/^thread\/([0-9]{1,50})(\/(p[0-9]{1,3})?)?$/', $uri, $queryString)) {
     $page = (count($queryString) === 4) ? (int) substr($queryString[3], 1) : 1;
     $threadId = (int) $queryString[1];
     $cacheKey = 'thread/' . $threadId . '/p' . $page;
+    recordThreadView($db, $threadId); // Before the cache, so guests served from it are counted too
     tryRenderFromCache($cacheKey);
     getThread($config, $db, $threadId, $page, $perPage, $data);
-    $totalPages = ceil(getTotalPosts($db, $threadId) / $perPage);
+    $totalPages = ceil(getTotalPosts($config, $db, $threadId) / $perPage);
     $data['page'] = $page;
     $data['has_pagination'] = $totalPages > 1;
     $data['pages'] = getPaginationPages($page, $totalPages);
-    recordThreadView($db, $threadId);
     if ($data['is_logged_in']) {
         markThreadAsRead($db, $threadId);
     }
@@ -1400,25 +1626,32 @@ if ($method === 'GET' && preg_match('/^(p[0-9]{1,3})?$/', $uri, $queryString)) {
     checkCsrf($data);
     $page = (count($queryString) === 4) ? (int) substr($queryString[3], 1) : 1;
     $threadId = (int) $queryString[1];
+    if (getTotalPosts($config, $db, $threadId) === 0) // Missing, or a held thread the user can't see
+        render(404, '404', $data);
     $data['errors'] = [];
     validatePost($config, $baseurl, $data['errors']);
     if (count($data['errors']) === 0) {
         checkRateLimit($config, $data, 'post-success', 5, 300);
-        $postId = addPost($db, $threadId);
-        sendNotificationEmails($config, $db, $threadId);
-        $totalPages = ceil(getTotalPosts($db, $threadId) / $perPage);
-        invalidateCache(['index', 'thread/' . $threadId . '/p' . $totalPages]);
+        if (isApproved($config, $db)) {
+            $postId = addPost($db, $threadId, TRUE);
+            sendNotificationEmails($config, $db, $threadId, $_SESSION['user_id'], $_SESSION['username'], $_POST['content']);
+            invalidateCache(['index', 'thread/' . $threadId . '/p']); // Every page, as a reply can add a page to the page links
+        } else {
+            $postId = addPost($db, $threadId, FALSE);
+            sendApprovalRequestEmail($config, $db);
+        }
+        $totalPages = ceil(getTotalPosts($config, $db, $threadId) / $perPage);
         redirect($baseurl . 'thread/' . $threadId . '/p' . $totalPages . '#' . $postId);
     }
     $data['has_errors'] = TRUE;
     getThread($config, $db, $threadId, $page, $perPage, $data);
     $data['id'] = $threadId;
-    $totalPages = ceil(getTotalPosts($db, $threadId) / $perPage);
+    $totalPages = ceil(getTotalPosts($config, $db, $threadId) / $perPage);
     $data['page'] = $page;
     $data['has_pagination'] = $totalPages > 1;
     $data['pages'] = getPaginationPages($page, $totalPages);
     $data['html_title'] = $data['title'];
-    render(400, 'thread', $data, $cacheKey);
+    render(400, 'thread', $data);
 } else if (in_array($method, ['GET', 'POST']) && preg_match('/^thread\/edit\/([0-9]{1,100})$/', $uri, $queryString)) {
     if (!$data['is_logged_in'])
         redirect($baseurl . 'login');
@@ -1472,7 +1705,8 @@ if ($method === 'GET' && preg_match('/^(p[0-9]{1,3})?$/', $uri, $queryString)) {
     checkCsrf($data);
     checkRateLimit($config, $data, 'threaddelete', 5, 300);
     $threadId = (int) $queryString[1];
-    deleteThread($config, $db, $threadId);
+    if (!deleteThread($config, $db, $threadId))
+        render(403, '403', $data);
     invalidateCache(['index', 'thread/' . $threadId . '/p']);
     redirect($baseurl);
 } else if ($method === 'POST' && preg_match('/^post\/delete\/([0-9]{1,100})$/', $uri, $queryString)) {
@@ -1492,9 +1726,45 @@ if ($method === 'GET' && preg_match('/^(p[0-9]{1,3})?$/', $uri, $queryString)) {
     $postId = (int) $queryString[1];
     $oldThreadId = getThreadId($db, $postId);
     $newThreadId = (int) $_POST['thread_id'];
+    // A held thread must stay hidden until it's approved, so nothing can be moved into it
+    $query = $db->prepare('SELECT 1 FROM threads WHERE id = :id AND NOT EXISTS (SELECT 1 FROM posts WHERE thread_id = :id AND is_approved = 1)');
+    $query->bindValue(':id', $newThreadId);
+    $query->execute();
+    if ($query->fetchColumn())
+        render(400, '400', $data);
     movePost($db, $postId, $newThreadId);
-    invalidateCache(['index', 'thread/' . $oldThreadId . '/p']);
+    invalidateCache(['index', 'thread/' . $oldThreadId . '/p', 'thread/' . $newThreadId . '/p']);
     redirect($baseurl);
+} else if ($method === 'GET' && $uri === 'approvals') {
+    if (!isAdmin($config))
+        render(403, '403', $data);
+    $data['pending'] = getPendingPosts($db);
+    render(200, 'approvals', $data);
+} else if ($method === 'POST' && preg_match('/^approvals\/(approve|reject-post|delete-user)\/([0-9]{1,100})$/', $uri, $queryString)) {
+    if (!isAdmin($config))
+        render(403, '403', $data);
+    checkCsrf($data);
+    $id = (int) $queryString[2];
+    if ($queryString[1] === 'approve') {
+        approveUser($config, $db, $id);
+    } else if ($queryString[1] === 'reject-post') {
+        $query = $db->prepare('SELECT thread_id FROM posts WHERE id = :id AND is_approved = 0 LIMIT 1');
+        $query->bindValue(':id', $id);
+        $query->execute();
+        $threadId = $query->fetchColumn();
+        if ($threadId)
+            removePost($db, $id, $threadId);
+    } else {
+        // Only for accounts awaiting approval: other accounts are deleted from their profile
+        $query = $db->prepare('SELECT username FROM users WHERE id = :id AND is_approved = 0 LIMIT 1');
+        $query->bindValue(':id', $id);
+        $query->execute();
+        $username = $query->fetchColumn();
+        if ($username && !in_array($username, $config['adminUsernames']) && !in_array($username, $config['trustedUsernames']))
+            deleteUser($db, $id);
+    }
+    invalidateCache(['index', 'thread/']);
+    redirect($baseurl . 'approvals');
 } else if ($method === 'GET' && $uri === 'upload') {
     if (!$data['is_logged_in'])
         redirect($baseurl . 'login');
@@ -1504,7 +1774,7 @@ if ($method === 'GET' && preg_match('/^(p[0-9]{1,3})?$/', $uri, $queryString)) {
         redirect($baseurl . 'login');
     checkCsrf($data);
     checkRateLimit($config, $data, 'upload', 10, 300);
-    $data['filename'] = handleUpload($config, $db);
+    $data['filename'] = handleUpload($config, $db, $data);
     if (!isset($_POST['useJS']))
         render(200, 'upload', $data);
     http_response_code(201);
@@ -1516,7 +1786,7 @@ if ($method === 'GET' && preg_match('/^(p[0-9]{1,3})?$/', $uri, $queryString)) {
         redirect($baseurl . 'login');
     checkCsrf($data);
     $postId = isset($_POST['post_id']) ? (int) $_POST['post_id'] : 0;
-    $query = $db->prepare('SELECT id FROM posts WHERE id = :id AND user_id != :user_id LIMIT 1');
+    $query = $db->prepare('SELECT id FROM posts WHERE id = :id AND user_id != :user_id AND is_approved = 1 LIMIT 1');
     $query->bindValue(':user_id', $_SESSION['user_id']);
     $query->bindValue(':id', $postId);
     $query->execute();
@@ -1528,32 +1798,28 @@ if ($method === 'GET' && preg_match('/^(p[0-9]{1,3})?$/', $uri, $queryString)) {
         addVote($db, $postId, $vote);
     }
     $threadId = getThreadId($db, $postId);
+    invalidateCache(['thread/' . $threadId . '/p']);
     redirect($baseurl . 'thread/' . $threadId . '/p' . $page . '#' . $postId);
 } else if ($method === 'GET' && preg_match('/^mention(\/[0-9]{1,50})?\/@([A-Za-z0-9_-]{1,100})$/', $uri, $queryString)) {
-    $limit = 5;
+    if (!$data['is_logged_in'])
+        render(403, '403', $data);
+    header('Content-Type: application/json');
+    $query = str_replace('_', '\_', $queryString[2]) . '%'; // _ is a LIKE wildcard but valid in usernames
     $results = [];
-    if (count($queryString) === 3) {
+    if ($queryString[1] !== '') {
         // Prioritise usernames in thread
-        $query = $queryString[2];
-        $stmt = $db->prepare('SELECT DISTINCT u.username FROM posts AS p LEFT JOIN users AS u ON p.user_id = u.id WHERE p.thread_id = :thread_id AND u.username LIKE :query ORDER BY u.username LIMIT 5');
+        $stmt = $db->prepare("SELECT DISTINCT u.username FROM posts AS p LEFT JOIN users AS u ON p.user_id = u.id WHERE p.thread_id = :thread_id AND p.is_approved = 1 AND u.username LIKE :query ESCAPE '\\' ORDER BY u.username LIMIT 5");
         $stmt->bindValue(':thread_id', substr($queryString[1], 1));
-        $stmt->bindValue(':query', $query . '%');
+        $stmt->bindValue(':query', $query);
         $stmt->execute();
         $results = $stmt->fetchAll(PDO::FETCH_COLUMN, 0);
-        $limit = $limit - count($results);
-        if (!$limit) {
-            echo json_encode($results);
-            exit;
-        }
-    } else {
-        $query = $queryString[1];
     }
-    header('Content-Type: application/json');
-    $stmt = $db->prepare('SELECT username FROM users WHERE username LIKE :query ORDER BY username LIMIT :limit');
-    $stmt->bindValue(':query', $query . '%');
-    $stmt->bindValue(':limit', $limit);
+    // Not people with posts awaiting approval, as those accounts are often spam
+    $stmt = $db->prepare("SELECT username FROM users WHERE username LIKE :query ESCAPE '\\'
+        AND NOT EXISTS (SELECT 1 FROM posts WHERE user_id = users.id AND is_approved = 0) ORDER BY username LIMIT 5");
+    $stmt->bindValue(':query', $query);
     $stmt->execute();
-    echo json_encode(array_merge($results, $stmt->fetchAll(PDO::FETCH_COLUMN, 0)));
+    echo json_encode(array_slice(array_values(array_unique(array_merge($results, $stmt->fetchAll(PDO::FETCH_COLUMN, 0)))), 0, 5));
 } else if (in_array($method, ['GET', 'POST']) && $uri === 'notifications') {
     if (!$data['is_logged_in'])
         redirect($baseurl . 'login');
