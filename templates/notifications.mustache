@@ -1,3 +1,7 @@
-<h2>Notifications updated</h2>
+<h2>Notifications{{#is_updated}} updated{{/is_updated}}</h2>
 {{#is_on}}<p>Notifications are now enabled :)</p>{{/is_on}}
 {{^is_on}}<p>Notifications are now disabled :(</p>{{/is_on}}
+<form action="{{baseurl}}notifications" method="post">
+    <input type="hidden" name="csrf" value="{{csrf}}" />
+    <input type="submit" value="{{#is_on}}Disable{{/is_on}}{{^is_on}}Enable{{/is_on}} notifications" />
+</form>
