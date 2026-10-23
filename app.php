@@ -1667,7 +1667,7 @@ if ($method === 'GET' && preg_match('/^(p[0-9]{1,3})?$/', $uri, $queryString)) {
     checkCsrf($data);
     checkRateLimit($config, $data, 'profileedit', 3, 300);
     $user = getUserByEmail($db, empty($_POST['email']) ? '' : $_POST['email']);
-    if ($user) {
+    if ($user && (int) $user['id'] === (int) $_SESSION['user_id']) { // Not anyone else's address, or this could email any member
         $code = generateVerification($db, $user['id'], 'profile');
         if (sendProfileEmail($config, $user['email'], $code) === FALSE)
             render(500, '500', $data);
