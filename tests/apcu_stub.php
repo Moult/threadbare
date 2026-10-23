@@ -31,6 +31,13 @@ if (!function_exists('apcu_fetch')) {
         apcu_stub_save($data);
         return TRUE;
     }
+    function apcu_inc($key, $step = 1)
+    {
+        $data = apcu_stub_load();
+        $data[$key] = ($data[$key] ?? 0) + $step;
+        apcu_stub_save($data);
+        return $data[$key];
+    }
     function apcu_delete($key)
     {
         $data = apcu_stub_load();

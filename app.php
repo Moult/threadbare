@@ -1357,12 +1357,20 @@ function isSpam($config, $baseurl, $content)
     return false;
 }
 
-// $key names the page rather than the URL, as //p2, /p02 and /p2/ are all the same page and mustn't each be a cache miss
+// Cached pages are in groups, 'index' (the front and tag pages) and 'thread/N', that are cleared together. Clearing
+// a group moves it to a new generation, so its old pages are no longer found and age out, which is quicker than
+// searching the whole cache for them. $page names the page rather than the URL, as //p2, /p02 and /p2/ are all
+// the same page and mustn't each be a cache miss.
+function cacheKey($group, $page)
+{
+    return 'html_' . $group . '_' . (int) apcu_fetch('cachegen_all') . '.' . (int) apcu_fetch('cachegen_' . $group) . '_' . $page;
+}
+
 function tryRenderFromCache($key): void
 {
     if (!empty($_SESSION['user_id']))
         return;
-    $html = apcu_fetch('html_' . $key);
+    $html = apcu_fetch($key);
     if ($html !== false) {
         echo $html;
         exit;
@@ -1371,18 +1379,15 @@ function tryRenderFromCache($key): void
 
 function saveCache($key, string $html, int $ttl = 900): void
 {
-    apcu_store('html_' . $key, $html, $ttl);
+    apcu_store($key, $html, $ttl);
 }
 
-function invalidateCache($keys)
+// $groups as in cacheKey(), or 'all' for every page
+function invalidateCache($groups)
 {
-    $cacheKeys = apcu_cache_info()['cache_list'] ?? [];
-    foreach ($cacheKeys as $item) {
-        foreach ($keys as $key) {
-            if (str_starts_with($item['info'], 'html_' . $key)) {  // Omit _ suffix to allow wildcard
-                apcu_delete($item['info']);
-            }
-        }
+    foreach ($groups as $group) {
+        apcu_add('cachegen_' . $group, 0);
+        apcu_inc('cachegen_' . $group);
     }
 }
 
@@ -1512,14 +1517,15 @@ foreach ([$_GET, $_POST] as $fields) {
 $queryString = [];
 if ($method === 'GET' && preg_match('/^(p[0-9]{1,3})?$/', $uri, $queryString)) {
     $page = (count($queryString) === 2) ? (int) substr($queryString[1], 1) : 1;
-    tryRenderFromCache('index/p' . $page);
+    $cacheKey = cacheKey('index', 'p' . $page);
+    tryRenderFromCache($cacheKey);
     $totalPages = ceil(getTotalThreads($db) / $perPage);
     if ($page < 1 || $page > max(1, $totalPages)) // Only real pages, so there's a bounded set of them to cache
         render(404, '404', $data);
     $data['threads'] = getThreads($db, $page, $perPage);
     $data['has_pagination'] = $totalPages > 1;
     $data['pages'] = getPaginationPages($page, $totalPages);
-    render(200, 'index', $data, 'index/p' . $page);
+    render(200, 'index', $data, $cacheKey);
 } else if ($method === 'GET' && $uri === 'tags') {
     $data['tags'] = $config['tags'];
     $data['hashtags'] = array_keys(getHashtags($db, $baseurl));
@@ -1535,7 +1541,7 @@ if ($method === 'GET' && preg_match('/^(p[0-9]{1,3})?$/', $uri, $queryString)) {
     if (!$isCurated && $data['tag'] !== strtolower($data['tag']))
         redirect($baseurl . 'tag/' . strtolower($data['tag']) . (isset($queryString[2]) ? '/' . $queryString[2] : ''));
     $page = (count($queryString) === 3) ? (int) substr($queryString[2], 1) : 1;
-    $cacheKey = 'index/tag/' . $data['tag'] . '/p' . $page; // Cleared along with the front page
+    $cacheKey = cacheKey('index', 'tag/' . $data['tag'] . '/p' . $page); // Cleared along with the front page
     tryRenderFromCache($cacheKey);
     [$where, $params] = tagFilter($data['tag'], $isCurated, $threadIds);
     $totalPages = ceil(getTotalThreads($db, $where, $params) / $perPage);
@@ -1653,7 +1659,7 @@ if ($method === 'GET' && preg_match('/^(p[0-9]{1,3})?$/', $uri, $queryString)) {
     $data['is_valid_code'] = (bool) $userId;
     if ($data['is_valid_code'] && !empty($_POST['confirm'])) {
         deleteUser($db, $userId);
-        invalidateCache(['index', 'thread/']);
+        invalidateCache(['all']);
         if ((int) $userId === (int) $_SESSION['user_id']) // An admin deleting someone else stays logged in
             logout();
         redirect($baseurl);
@@ -1754,7 +1760,7 @@ if ($method === 'GET' && preg_match('/^(p[0-9]{1,3})?$/', $uri, $queryString)) {
 } else if ($method === 'GET' && preg_match('/^thread\/([0-9]{1,50})(\/(p[0-9]{1,3})?)?$/', $uri, $queryString)) {
     $page = (count($queryString) === 4) ? (int) substr($queryString[3], 1) : 1;
     $threadId = (int) $queryString[1];
-    $cacheKey = 'thread/' . $threadId . '/p' . $page;
+    $cacheKey = cacheKey('thread/' . $threadId, 'p' . $page);
     recordThreadView($db, $threadId); // Before the cache, so guests served from it are counted too
     tryRenderFromCache($cacheKey);
     $totalPages = ceil(getTotalPosts($config, $db, $threadId) / $perPage);
@@ -1785,7 +1791,7 @@ if ($method === 'GET' && preg_match('/^(p[0-9]{1,3})?$/', $uri, $queryString)) {
         if (isApproved($config, $db)) {
             $postId = addPost($db, $threadId, TRUE);
             sendNotificationEmails($config, $db, $threadId, $_SESSION['user_id'], $_SESSION['username'], $_POST['content']);
-            invalidateCache(['index', 'thread/' . $threadId . '/p']); // Every page, as a reply can add a page to the page links
+            invalidateCache(['index', 'thread/' . $threadId]); // Every page, as a reply can add a page to the page links
         } else {
             $postId = addPost($db, $threadId, FALSE);
             sendApprovalRequestEmail($config, $db);
@@ -1819,7 +1825,7 @@ if ($method === 'GET' && preg_match('/^(p[0-9]{1,3})?$/', $uri, $queryString)) {
     if (count($data['errors']) === 0) {
         checkRateLimit($config, $data, 'threadedit', 5, 300);
         updateThread($db, $threadId);
-        invalidateCache(['index', 'thread/' . $threadId . '/p']);
+        invalidateCache(['index', 'thread/' . $threadId]);
         redirect($baseurl . 'thread/' . $threadId);
     }
     $data['has_errors'] = TRUE;
@@ -1844,7 +1850,7 @@ if ($method === 'GET' && preg_match('/^(p[0-9]{1,3})?$/', $uri, $queryString)) {
     if (count($data['errors']) === 0) {
         checkRateLimit($config, $data, 'postedit', 5, 300);
         updatePost($db, $postId);
-        invalidateCache(['thread/' . $post['thread_id'] . '/p']);
+        invalidateCache(['thread/' . $post['thread_id']]);
         redirect($baseurl . 'thread/' . $post['thread_id']);
     }
     $data['has_errors'] = TRUE;
@@ -1857,7 +1863,7 @@ if ($method === 'GET' && preg_match('/^(p[0-9]{1,3})?$/', $uri, $queryString)) {
     $threadId = (int) $queryString[1];
     if (!deleteThread($config, $db, $threadId))
         render(403, '403', $data);
-    invalidateCache(['index', 'thread/' . $threadId . '/p']);
+    invalidateCache(['index', 'thread/' . $threadId]);
     redirect($baseurl);
 } else if ($method === 'POST' && preg_match('/^post\/delete\/([0-9]{1,100})$/', $uri, $queryString)) {
     if (!$data['is_logged_in'])
@@ -1867,7 +1873,7 @@ if ($method === 'GET' && preg_match('/^(p[0-9]{1,3})?$/', $uri, $queryString)) {
     $postId = (int) $queryString[1];
     $threadId = getThreadId($db, $postId);
     deletePost($config, $db, $postId);
-    invalidateCache(['index', 'thread/' . $threadId . '/p']);
+    invalidateCache(['index', 'thread/' . $threadId]);
     redirect($baseurl . 'thread/' . $threadId . '/latest');
 } else if ($method === 'POST' && preg_match('/^post\/move\/([0-9]{1,100})$/', $uri, $queryString)) {
     if (!$data['is_logged_in'] || !in_array($_SESSION['username'], $config['adminUsernames']))
@@ -1883,7 +1889,7 @@ if ($method === 'GET' && preg_match('/^(p[0-9]{1,3})?$/', $uri, $queryString)) {
     if ($query->fetchColumn())
         render(400, '400', $data);
     movePost($db, $postId, $newThreadId);
-    invalidateCache(['index', 'thread/' . $oldThreadId . '/p', 'thread/' . $newThreadId . '/p']);
+    invalidateCache(['index', 'thread/' . $oldThreadId, 'thread/' . $newThreadId]);
     redirect($baseurl);
 } else if ($method === 'GET' && $uri === 'approvals') {
     if (!isAdmin($config))
@@ -1918,7 +1924,7 @@ if ($method === 'GET' && preg_match('/^(p[0-9]{1,3})?$/', $uri, $queryString)) {
         if ($username && !in_array($username, $config['adminUsernames']) && !in_array($username, $config['trustedUsernames']))
             deleteUser($db, $id);
     }
-    invalidateCache(['index', 'thread/']);
+    invalidateCache(['all']);
     redirect($baseurl . 'approvals');
 } else if ($method === 'GET' && $uri === 'upload') {
     if (!$data['is_logged_in'])
@@ -1953,7 +1959,7 @@ if ($method === 'GET' && preg_match('/^(p[0-9]{1,3})?$/', $uri, $queryString)) {
         addVote($db, $postId, $vote);
     }
     $threadId = getThreadId($db, $postId);
-    invalidateCache(['thread/' . $threadId . '/p']);
+    invalidateCache(['thread/' . $threadId]);
     redirect($baseurl . 'thread/' . $threadId . '/p' . $page . '#' . $postId);
 } else if ($method === 'GET' && preg_match('/^mention(\/[0-9]{1,50})?\/@([A-Za-z0-9_-]{1,100})$/', $uri, $queryString)) {
     if (!$data['is_logged_in'])
