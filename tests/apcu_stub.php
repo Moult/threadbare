@@ -45,6 +45,12 @@ if (!function_exists('apcu_fetch')) {
         apcu_stub_save($data);
         return TRUE;
     }
+    function apcu_sma_info($limited = FALSE) // Memory is the size of the file, out of APCU_STUB_SHM bytes (32M)
+    {
+        $size = (int) (getenv('APCU_STUB_SHM') ?: 32 * 1024 * 1024);
+        $file = getenv('APCU_STUB_FILE');
+        return ['num_seg' => 1, 'seg_size' => $size, 'avail_mem' => $size - (is_file($file) ? filesize($file) : 0)];
+    }
     function apcu_cache_info()
     {
         if (str_ends_with(debug_backtrace()[0]['file'] ?? '', '/app.php')) // Tests check the forum never lists the cache
