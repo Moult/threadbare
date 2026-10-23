@@ -81,3 +81,4 @@ CREATE INDEX posts_pending ON posts(is_approved) WHERE is_approved = 0;
 CREATE INDEX threads_ts_updated ON threads(ts_updated);
 CREATE INDEX posts_thread_approved ON posts(thread_id, is_approved);
 CREATE INDEX users_username_lower ON users(LOWER(username));
+CREATE INDEX votes_flags ON votes(post_id) WHERE value = -1;
