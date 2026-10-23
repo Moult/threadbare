@@ -269,16 +269,21 @@ function getUserByEmail($db, $email)
     return $query->fetch();
 }
 
-function generateVerification($db, $userId)
+// $purpose is 'verify', 'reset' or 'profile'; a code only works for its purpose, for a day
+function generateVerification($db, $userId, $purpose)
 {
-    $query = $db->prepare('DELETE FROM verifications WHERE user_id = :user_id');
+    // Replace only a code for the same purpose: asking for, say, a verification email mustn't cancel a reset link
+    $query = $db->prepare('DELETE FROM verifications WHERE user_id = :user_id AND purpose = :purpose');
     $query->bindValue(':user_id', $userId);
+    $query->bindValue(':purpose', $purpose);
     $query->execute();
 
     $code = bin2hex(random_bytes(32));
-    $query = $db->prepare('INSERT INTO verifications(code, user_id) VALUES(:code, :user_id)');
+    $query = $db->prepare('INSERT INTO verifications(code, user_id, purpose, ts_created) VALUES(:code, :user_id, :purpose, :ts_created)');
     $query->bindValue(':code', $code);
     $query->bindValue(':user_id', $userId);
+    $query->bindValue(':purpose', $purpose);
+    $query->bindValue(':ts_created', time());
     $query->execute();
     return $code;
 }
@@ -394,7 +399,7 @@ function sendNotificationEmails($config, $db, $threadId)
     return sendEmail($config, $to, $subject, $content);
 }
 
-function checkVerificationCode($config, $db, $code)
+function checkVerificationCode($config, $db, $code, $purpose)
 {
     if (isset($_SESSION['user_id']) && in_array($_SESSION['username'], $config['adminUsernames'])) {
         $query = $db->prepare('SELECT id FROM users WHERE username = :code LIMIT 1');
@@ -405,8 +410,10 @@ function checkVerificationCode($config, $db, $code)
             return FALSE;
         return $userId;
     }
-    $query = $db->prepare('SELECT user_id FROM verifications WHERE code = :code LIMIT 1');
+    $query = $db->prepare('SELECT user_id FROM verifications WHERE code = :code AND purpose = :purpose AND ts_created > :since LIMIT 1');
     $query->bindValue(':code', $code);
+    $query->bindValue(':purpose', $purpose);
+    $query->bindValue(':since', time() - 86400);
     $query->execute();
     $userId = $query->fetchColumn(0);
     if (!$userId)
@@ -490,8 +497,10 @@ function updateThread($db, $id)
 
 function verifyUser($db, $code)
 {
-    $query = $db->prepare('SELECT user_id FROM verifications WHERE code = :code LIMIT 1');
+    $query = $db->prepare('SELECT user_id FROM verifications WHERE code = :code AND purpose = :purpose AND ts_created > :since LIMIT 1');
     $query->bindValue(':code', $code);
+    $query->bindValue(':purpose', 'verify');
+    $query->bindValue(':since', time() - 86400);
     $query->execute();
     $userId = $query->fetchColumn(0);
     if (!$userId)
@@ -1212,7 +1221,7 @@ if ($method === 'GET' && preg_match('/^(p[0-9]{1,3})?$/', $uri, $queryString)) {
     $data['errors'] = validateRegistration($config, $db);
     if (count($data['errors']) === 0) {
         $userId = addUser($db);
-        $code = generateVerification($db, $userId);
+        $code = generateVerification($db, $userId, 'verify');
         if (sendVerificationEmail($config, $_POST['email'], $code) === FALSE)
             render(500, '500', $data);
         $data['is_sent'] = TRUE;
@@ -1232,7 +1241,7 @@ if ($method === 'GET' && preg_match('/^(p[0-9]{1,3})?$/', $uri, $queryString)) {
     checkCaptcha($config);
     $user = getUserByEmail($db, empty($_POST['email']) ? '' : $_POST['email']);
     if ($user) {
-        $code = generateVerification($db, $user['id']);
+        $code = generateVerification($db, $user['id'], 'reset');
         if (sendResetEmail($config, $user['email'], $code) === FALSE)
             render(500, '500', $data);
     }
@@ -1240,13 +1249,13 @@ if ($method === 'GET' && preg_match('/^(p[0-9]{1,3})?$/', $uri, $queryString)) {
     render(200, 'reset', $data);
 } else if ($method === 'GET' && preg_match('/^reset\/([A-Za-z0-9]{1,100})$/', $uri, $queryString)) {
     $data['code'] = $queryString[1];
-    $data['is_valid_code'] = (bool) checkVerificationCode($config, $db, $queryString[1]);
+    $data['is_valid_code'] = (bool) checkVerificationCode($config, $db, $queryString[1], 'reset');
     render(200, 'reset', $data);
 } else if ($method === 'POST' && preg_match('/^reset\/([A-Za-z0-9]{1,100})$/', $uri, $queryString)) {
     checkCsrf($data);
     checkRateLimit($config, $data, 'reset', 3, 300);
     $data['code'] = $queryString[1];
-    $userId = checkVerificationCode($config, $db, $queryString[1]);
+    $userId = checkVerificationCode($config, $db, $queryString[1], 'reset');
     $data['is_valid_code'] = (bool) $userId;
     if ($data['is_valid_code']) {
         $data['errors'] = validatePassword();
@@ -1265,7 +1274,7 @@ if ($method === 'GET' && preg_match('/^(p[0-9]{1,3})?$/', $uri, $queryString)) {
     checkCaptcha($config);
     $user = getUserByEmail($db, empty($_POST['email']) ? '' : $_POST['email']);
     if ($user) {
-        $code = generateVerification($db, $user['id']);
+        $code = generateVerification($db, $user['id'], 'verify');
         if (sendVerificationEmail($config, $user['email'], $code) === FALSE)
             render(500, '500', $data);
     }
@@ -1287,7 +1296,7 @@ if ($method === 'GET' && preg_match('/^(p[0-9]{1,3})?$/', $uri, $queryString)) {
     if (!$data['is_logged_in'])
         redirect($baseurl . 'login');
     checkCsrf($data);
-    $userId = checkVerificationCode($config, $db, $queryString[1]);
+    $userId = checkVerificationCode($config, $db, $queryString[1], 'profile');
     $data['is_valid_code'] = (bool) $userId;
     if ($data['is_valid_code'] && !empty($_POST['confirm'])) {
         deleteUser($db, $userId);
@@ -1306,7 +1315,7 @@ if ($method === 'GET' && preg_match('/^(p[0-9]{1,3})?$/', $uri, $queryString)) {
     checkRateLimit($config, $data, 'profileedit', 3, 300);
     $user = getUserByEmail($db, empty($_POST['email']) ? '' : $_POST['email']);
     if ($user) {
-        $code = generateVerification($db, $user['id']);
+        $code = generateVerification($db, $user['id'], 'profile');
         if (sendProfileEmail($config, $user['email'], $code) === FALSE)
             render(500, '500', $data);
     }
@@ -1316,7 +1325,7 @@ if ($method === 'GET' && preg_match('/^(p[0-9]{1,3})?$/', $uri, $queryString)) {
     if (!$data['is_logged_in'])
         redirect($baseurl . 'login');
     $data['code'] = $queryString[1];
-    $userId = checkVerificationCode($config, $db, $queryString[1]);
+    $userId = checkVerificationCode($config, $db, $queryString[1], 'profile');
     $data['is_valid_code'] = (bool) $userId;
     if ($data['is_valid_code']) {
         getProfile($db, $userId, $data);
@@ -1328,7 +1337,7 @@ if ($method === 'GET' && preg_match('/^(p[0-9]{1,3})?$/', $uri, $queryString)) {
     checkCsrf($data);
     checkRateLimit($config, $data, 'profileedit', 3, 300);
     $data['code'] = $queryString[1];
-    $userId = checkVerificationCode($config, $db, $queryString[1]);
+    $userId = checkVerificationCode($config, $db, $queryString[1], 'profile');
     $data['is_valid_code'] = (bool) $userId;
     if ($data['is_valid_code']) {
         $data['email'] = $_POST['email'];
