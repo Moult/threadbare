@@ -3,7 +3,7 @@ return [
     'baseurl' => 'http://localhost/', // With trailing slash
     'websiteTitle' => 'Threadbare Demo',
     'tags' => ['question', 'showcase', 'intro'],
-    'blurb' => 'This is a demo discussion forum for the Threadbare forum software.,
+    'blurb' => 'This is a demo discussion forum for the Threadbare forum software.',
     'iqQuestion' => 'What is the colour of George Washington\'s favourite black horse?',
     'iqAnswer' => 'black',
     'emailFrom' => 'noreply@website.example',
@@ -17,4 +17,8 @@ return [
     'hCaptchaSecretKey' => '',
     'adminUsernames' => [],
     'trustedUsernames' => [],
+    // Behind a CDN or reverse proxy only: the header it puts the visitor's address in, e.g. 'CF-Connecting-IP' or
+    // 'X-Forwarded-For', so rate limits count visitors rather than the proxy. Anyone can send this header, so only
+    // set it when the site can't be reached except through the proxy.
+    'clientIpHeader' => '',
 ];

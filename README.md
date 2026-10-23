@@ -40,6 +40,7 @@ Features:
  - Basic user profile with Markdown bio and latest posts.
  - Login, sign up, email validation, reset password, edit profile, delete account.
  - Captcha and Akismet.
+ - New users' posts are held until an admin approves them, so spam sign-ups never reach the forum. Admins see the queue in the header and get an email when someone new posts.
  - Admins can edit / delete all posts / users and bypass rate limits. Admins can also move posts to other threads or split into a new thread. Trusted users bypass spam filters.
  - Aggressive caching for guests (using APCu cache).
  - Pagination.
@@ -60,6 +61,8 @@ $ sqlite3 threadbare.db < db.sql
 $ cp config.php.template config.php
 $ vim config.php # Add your API keys and set website URL
 ```
+
+Rate limits count visitors by IP address (IPv6 by /64). If the site is behind a CDN or reverse proxy, set `clientIpHeader` in `config.php` to the header the proxy puts the visitor's address in, or every visitor shares the proxy's limits.
 
 Nginx:
 
