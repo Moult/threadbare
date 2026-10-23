@@ -1323,10 +1323,11 @@ function handleUpload($config, $db, $data)
 
 function recordThreadView($db, $threadId)
 {
-    $key = "viewed_thread_$threadId";
     // Only count clients that send the session cookie back: one that never does (most bots) would be a new view, and a write, on every request
-    if (!isset($_SESSION[$key]) && session_status() === PHP_SESSION_ACTIVE && ($_COOKIE[session_name()] ?? NULL) === session_id()) {
-        $_SESSION[$key] = true;
+    if (!isset($_SESSION['viewed'][$threadId]) && session_status() === PHP_SESSION_ACTIVE && ($_COOKIE[session_name()] ?? NULL) === session_id()) {
+        $_SESSION['viewed'][$threadId] = TRUE;
+        if (count($_SESSION['viewed']) > 200) // Only the latest, so a crawler's session doesn't grow with every thread it visits
+            unset($_SESSION['viewed'][array_key_first($_SESSION['viewed'])]);
         $query = $db->prepare('UPDATE threads SET views = views + 1 WHERE id = ?');
         $query->execute([$threadId]);
     }
