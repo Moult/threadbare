@@ -391,10 +391,10 @@ function sendNotificationEmails($config, $db, $threadId, $userId, $poster, $post
     $query->execute();
     $myEmail = $query->fetchColumn(0);
 
-    // Mentions
+    // Mentions: only the first 20 people, as each is a lookup and an email
     preg_match_all('/@([a-zA-Z0-9_-]{1,50})/', $postContent, $matches);
     if (!empty($matches[1])) {
-        $usernames = array_unique($matches[1]);
+        $usernames = array_slice(array_unique(array_map('strtolower', $matches[1])), 0, 20);
         foreach ($usernames as $username) {
             $query = $db->prepare('SELECT email FROM users WHERE LOWER(username) = LOWER(:username) AND notifications = 1 LIMIT 1');
             $query->bindValue(':username', $username, PDO::PARAM_STR);
@@ -433,7 +433,11 @@ function sendNotificationEmails($config, $db, $threadId, $userId, $poster, $post
     foreach (array_unique($emails) as $email) {
         $to[] = ["to" => [["email" => $email]]];
     }
-    return sendEmail($config, $to, $subject, $content);
+    $sent = TRUE;
+    foreach (array_chunk($to, 1000) as $batch) { // SendGrid refuses a message to more than 1000
+        $sent = sendEmail($config, $batch, $subject, $content) && $sent;
+    }
+    return $sent;
 }
 
 function checkVerificationCode($config, $db, $code, $purpose)
