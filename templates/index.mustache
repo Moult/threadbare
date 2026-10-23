@@ -7,6 +7,12 @@
 </p>
 <p>{{blurb}}</p>
 {{/heading}}
+{{#no_results}}
+<p>Nothing found. Search looks at thread titles and usernames; try a <a href="{{web_search}}">web search</a> for post text.</p>
+{{/no_results}}
+{{#users}}
+<p class="user-result"><span class="avatar {{avatar}}">{{initial}}</span> <a href="{{baseurl}}profile/{{id}}">{{username}}</a></p>
+{{/users}}
 <ol class="threads">
     {{#threads}}
     <li class="thread{{#is_unread}} unread{{/is_unread}}">
