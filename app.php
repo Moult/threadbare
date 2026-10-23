@@ -1814,7 +1814,9 @@ if ($method === 'GET' && preg_match('/^(p[0-9]{1,3})?$/', $uri, $queryString)) {
         $stmt->execute();
         $results = $stmt->fetchAll(PDO::FETCH_COLUMN, 0);
     }
-    $stmt = $db->prepare("SELECT username FROM users WHERE username LIKE :query ESCAPE '\\' ORDER BY username LIMIT 5");
+    // Not people with posts awaiting approval, as those accounts are often spam
+    $stmt = $db->prepare("SELECT username FROM users WHERE username LIKE :query ESCAPE '\\'
+        AND NOT EXISTS (SELECT 1 FROM posts WHERE user_id = users.id AND is_approved = 0) ORDER BY username LIMIT 5");
     $stmt->bindValue(':query', $query);
     $stmt->execute();
     echo json_encode(array_slice(array_values(array_unique(array_merge($results, $stmt->fetchAll(PDO::FETCH_COLUMN, 0)))), 0, 5));
