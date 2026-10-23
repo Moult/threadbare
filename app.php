@@ -1285,6 +1285,7 @@ function isSpam($config, $baseurl, $content)
     return false;
 }
 
+// $key names the page rather than the URL, as //p2, /p02 and /p2/ are all the same page and mustn't each be a cache miss
 function tryRenderFromCache($key): void
 {
     if (!empty($_SESSION['user_id']))
