@@ -1463,8 +1463,10 @@ if ($method === 'GET' && preg_match('/^(p[0-9]{1,3})?$/', $uri, $queryString)) {
     $page = (count($queryString) === 2) ? (int) substr($queryString[1], 1) : 1;
     $cacheKey = 'index/p' . $page;
     tryRenderFromCache($cacheKey);
-    $data['threads'] = getThreads($db, $page, $perPage);
     $totalPages = ceil(getTotalThreads($db) / $perPage);
+    if ($page < 1 || $page > max(1, $totalPages)) // Only real pages, so there's a bounded set of them to cache
+        render(404, '404', $data);
+    $data['threads'] = getThreads($db, $page, $perPage);
     $data['has_pagination'] = $totalPages > 1;
     $data['pages'] = getPaginationPages($page, $totalPages);
     render(200, 'index', $data, $cacheKey);
@@ -1476,8 +1478,10 @@ if ($method === 'GET' && preg_match('/^(p[0-9]{1,3})?$/', $uri, $queryString)) {
     if (!in_array($data['tag'], $config['tags']))
         render(404, '404', $data);
     $page = (count($queryString) === 3) ? (int) substr($queryString[2], 1) : 1;
-    $data['threads'] = getThreads($db, $page, $perPage, $data['tag']);
     $totalPages = ceil(getTotalThreads($db, $data['tag']) / $perPage);
+    if ($page < 1 || $page > max(1, $totalPages)) // Before listing the threads, so a missing page costs only the count
+        render(404, '404', $data);
+    $data['threads'] = getThreads($db, $page, $perPage, $data['tag']);
     $data['has_pagination'] = $totalPages > 1;
     $data['pages'] = getPaginationPages($page, $totalPages);
     render(200, 'index', $data);
@@ -1693,8 +1697,10 @@ if ($method === 'GET' && preg_match('/^(p[0-9]{1,3})?$/', $uri, $queryString)) {
     $cacheKey = 'thread/' . $threadId . '/p' . $page;
     recordThreadView($db, $threadId); // Before the cache, so guests served from it are counted too
     tryRenderFromCache($cacheKey);
-    getThread($config, $db, $threadId, $page, $perPage, $data);
     $totalPages = ceil(getTotalPosts($config, $db, $threadId) / $perPage);
+    if ($page < 1 || $page > max(1, $totalPages)) // Only real pages, so there's a bounded set of them to cache
+        render(404, '404', $data);
+    getThread($config, $db, $threadId, $page, $perPage, $data);
     $data['page'] = $page;
     $data['has_pagination'] = $totalPages > 1;
     $data['pages'] = getPaginationPages($page, $totalPages);
