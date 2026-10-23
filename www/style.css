@@ -161,6 +161,16 @@ nav .logout button:hover {
     background-color: #e14658;
     cursor: pointer;
 }
+.post .reactions .avatar {
+    float: none;
+    width: 20px;
+    height: 20px;
+    line-height: 20px;
+    margin: 0 2px 0 0;
+    font-size: 0.9em;
+    text-decoration: none;
+    vertical-align: middle;
+}
 label {
     margin-top: 10px;
     display: block;

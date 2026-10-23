@@ -22,6 +22,9 @@
         {{#pending_count}}
         <li><a href="{{baseurl}}approvals">{{pending_count}} awaiting approval</a></li>
         {{/pending_count}}
+        {{#flagged_count}}
+        <li><a href="{{baseurl}}approvals#flagged">{{flagged_count}} flagged</a></li>
+        {{/flagged_count}}
         {{#is_logged_in}}
         <li>
             <form action="{{baseurl}}logout" method="post" class="logout">
