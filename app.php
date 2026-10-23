@@ -526,6 +526,7 @@ function updatePost($db, $id)
     $query->bindValue(':content', $_POST['content']);
     $query->bindValue(':ts_updated', time());
     $query->execute();
+    expireHashtags(); // The edit may have added or removed some
 }
 
 function movePost($db, $id, $threadId)
@@ -650,6 +651,8 @@ function addPost($db, $threadId, $isApproved)
     $postId = $db->lastInsertId();
     if (!$isApproved)
         return $postId; // A held post doesn't bump the thread until it's approved
+    if (str_contains($_POST['content'], '#'))
+        expireHashtags();
 
     $query = $db->prepare('UPDATE threads SET last_user_id = :user_id, ts_updated = :ts_updated WHERE id = :thread_id');
     $query->bindValue(':thread_id', $threadId);
@@ -713,6 +716,7 @@ function approveUser($config, $db, $userId)
     $query = $db->prepare('UPDATE posts SET is_approved = 1 WHERE user_id = :user_id AND is_approved = 0');
     $query->bindValue(':user_id', $userId);
     $query->execute();
+    expireHashtags();
 
     foreach (array_unique(array_column($posts, 'thread_id')) as $threadId) {
         $query = $db->prepare('UPDATE threads SET ts_updated = :ts_updated,
@@ -820,7 +824,8 @@ function getProfile($db, $id, &$data)
     $data['bio'] = $row[2] ?? '';
 }
 
-function getThreads($db, $page = 1, $perPage = 20, $tag = NULL)
+// $where is an SQL condition on the thread t, with its $params
+function getThreads($db, $page = 1, $perPage = 20, $where = NULL, $params = [])
 {
     $results = [];
     $sql = 'SELECT t.id, t.title, t.views, r.last_read_at, t.user_id, u.username, t.last_user_id, lu.username AS last_username, u.email, t.ts_created, t.ts_updated, count(p.id) AS total_posts, t.tags
@@ -829,13 +834,13 @@ function getThreads($db, $page = 1, $perPage = 20, $tag = NULL)
         LEFT JOIN users AS lu ON t.last_user_id = lu.id
         LEFT JOIN posts AS p ON p.thread_id = t.id AND p.is_approved = 1
         LEFT JOIN thread_reads AS r ON r.thread_id = t.id AND r.user_id = :user_id';
-    if ($tag !== NULL) {
-        $sql .= " WHERE ',' || t.tags || ',' LIKE :tag"; // Whole tags only: intro must not match introduction
+    if ($where !== NULL) {
+        $sql .= " WHERE $where";
     }
     $sql .= ' GROUP BY t.id HAVING count(p.id) > 0 ORDER BY t.ts_updated DESC LIMIT :limit OFFSET :offset'; // A held new thread has no approved posts
     $query = $db->prepare($sql);
-    if ($tag !== NULL) {
-        $query->bindValue(':tag', '%,' . $tag . ',%', PDO::PARAM_STR);
+    foreach ($params as $name => $value) {
+        $query->bindValue($name, $value, PDO::PARAM_STR);
     }
     $query->bindValue(':limit', $perPage, PDO::PARAM_INT);
     $query->bindValue(':offset', ($page - 1) * $perPage, PDO::PARAM_INT);
@@ -866,15 +871,26 @@ function getThreads($db, $page = 1, $perPage = 20, $tag = NULL)
     return $results;
 }
 
-function getTotalThreads($db, $tag = NULL)
+function getTotalThreads($db, $where = NULL, $params = [])
 {
-    $approved = 'EXISTS (SELECT 1 FROM posts WHERE thread_id = threads.id AND is_approved = 1)';
-    if ($tag === NULL)
-        return (int) $db->query("SELECT COUNT(*) FROM threads WHERE $approved")->fetchColumn();
-    $query = $db->prepare("SELECT COUNT(*) FROM threads WHERE ',' || tags || ',' LIKE :tag AND $approved");
-    $query->bindValue(':tag', '%,' . $tag . ',%', PDO::PARAM_STR);
-    $query->execute();
+    $query = $db->prepare('SELECT COUNT(*) FROM threads AS t WHERE EXISTS (SELECT 1 FROM posts WHERE thread_id = t.id AND is_approved = 1)'
+        . ($where !== NULL ? " AND ($where)" : ''));
+    $query->execute($params);
     return (int) $query->fetchColumn();
+}
+
+// Threads with a curated tag, or with a recent post using it as a hashtag
+function tagFilter($tag, $isCurated, $threadIds)
+{
+    $where = [];
+    $params = [];
+    if ($isCurated) {
+        $where[] = "',' || t.tags || ',' LIKE :tag"; // Whole tags only: intro must not match introduction
+        $params[':tag'] = '%,' . $tag . ',%';
+    }
+    if ($threadIds)
+        $where[] = 't.id IN (' . implode(',', array_map('intval', $threadIds)) . ')';
+    return [implode(' OR ', $where), $params];
 }
 
 // Posts in a thread that the viewer can see: held posts only by their author and admins
@@ -988,12 +1004,7 @@ function getThread($config, $db, $threadId, $page, $perPage, &$data)
     $query->bindValue(':offset', ($page - 1) * $perPage, PDO::PARAM_INT);
     $query->execute();
     while ($row = $query->fetch()) {
-        $Parsedown = new ForumMarkdown();
-        $Parsedown->setSafeMode(true);
-        $content = $row['content'];
-        $content = preProcessMentions($content);
-        $content = $Parsedown->text($content);
-        $content = postProcessMentions($content);
+        $content = linkHashtags(renderPost($row['content']), $config['baseurl']);
         $row['can_vote'] = !empty($_SESSION['user_id']) && $_SESSION['user_id'] !== $row['user_id'] && $row['is_approved'];
         $row['has_votes'] = $row['upvotes'] || $row['downvotes'];
         $row['is_pending'] = !$row['is_approved'];
@@ -1009,6 +1020,82 @@ function getThread($config, $db, $threadId, $page, $perPage, &$data)
         $row['content'] = $content;
         $row['can_edit'] = isset($_SESSION['user_id']) ? $row['user_id'] === $_SESSION['user_id'] || in_array($_SESSION['username'], $config['adminUsernames']) : FALSE;
         $data['posts'][] = $row;
+    }
+}
+
+function renderPost($content)
+{
+    $Parsedown = new ForumMarkdown();
+    $Parsedown->setSafeMode(true);
+    return postProcessMentions($Parsedown->text(preProcessMentions($content)));
+}
+
+// A hashtag is a word starting with # after a space or bracket, so headings, URL fragments and entities don't count
+const HASHTAG = '/(?<=[\s(])#([A-Za-z][A-Za-z0-9_]{1,49})(?![A-Za-z0-9_])/';
+const HASHTAG_POSTS = 2000; // How many recent posts the list of hashtags comes from
+const HASHTAG_LIMIT = 50;   // How many of the most used hashtags it keeps
+const HASHTAG_TTL = 600;
+
+// Links the hashtags in rendered post HTML, leaving alone code and existing links; collects them, lowercased, in $tags
+function linkHashtags($html, $baseurl, &$tags = [])
+{
+    $parts = preg_split('/(<[^>]*>)/', $html, -1, PREG_SPLIT_DELIM_CAPTURE);
+    $skip = 0;
+    foreach ($parts as $i => $part) {
+        if ($i % 2) {
+            if (preg_match('/^<(\/?)(a|code|pre)\b/i', $part, $m))
+                $skip = max(0, $skip + ($m[1] ? -1 : 1));
+        } else if (!$skip && str_contains($part, '#')) {
+            $parts[$i] = preg_replace_callback(HASHTAG, function ($m) use ($baseurl, &$tags) {
+                $tags[] = $tag = strtolower($m[1]);
+                return '<a href="' . $baseurl . 'tag/' . $tag . '" class="hashtag">#' . $m[1] . '</a>';
+            }, $part);
+        }
+    }
+    return implode('', $parts);
+}
+
+// The most used hashtags in recent posts, each with the threads using it. Built at most once per HASHTAG_TTL
+// whatever the traffic, so tag pages never scan posts on request
+function getHashtags($db, $baseurl)
+{
+    $cached = apcu_fetch('hashtags');
+    if ($cached !== FALSE && $cached['ts'] > time() - HASHTAG_TTL)
+        return $cached['tags'];
+    if (!apcu_add('hashtags_lock', 1, 30)) // Another request is rebuilding it: use the old list meanwhile
+        return $cached['tags'] ?? [];
+    $query = $db->prepare('SELECT thread_id, content FROM posts WHERE is_approved = 1 ORDER BY id DESC LIMIT :limit');
+    $query->bindValue(':limit', HASHTAG_POSTS, PDO::PARAM_INT);
+    $query->execute();
+    $uses = [];
+    $threads = [];
+    while ($row = $query->fetch()) {
+        if (!str_contains($row['content'], '#'))
+            continue;
+        $tags = [];
+        linkHashtags(renderPost($row['content']), $baseurl, $tags);
+        foreach (array_unique($tags) as $tag) {
+            $uses[$tag] = ($uses[$tag] ?? 0) + 1;
+            $threads[$tag][$row['thread_id']] = TRUE;
+        }
+    }
+    arsort($uses);
+    $tags = [];
+    foreach (array_slice(array_keys($uses), 0, HASHTAG_LIMIT) as $tag) {
+        $tags[$tag] = array_keys($threads[$tag]);
+    }
+    apcu_store('hashtags', ['ts' => time(), 'tags' => $tags]);
+    apcu_delete('hashtags_lock');
+    return $tags;
+}
+
+// Rebuild the hashtag list on the next request that needs it, rather than when it times out
+function expireHashtags()
+{
+    $cached = apcu_fetch('hashtags');
+    if ($cached !== FALSE) {
+        $cached['ts'] = 0;
+        apcu_store('hashtags', $cached);
     }
 }
 
@@ -1387,17 +1474,29 @@ if ($method === 'GET' && preg_match('/^(p[0-9]{1,3})?$/', $uri, $queryString)) {
     render(200, 'index', $data, 'index');
 } else if ($method === 'GET' && $uri === 'tags') {
     $data['tags'] = $config['tags'];
+    $data['hashtags'] = array_keys(getHashtags($db, $baseurl));
+    sort($data['hashtags']);
+    $data['has_hashtags'] = (bool) $data['hashtags'];
     render(200, 'tags', $data);
-} else if ($method === 'GET' && preg_match('/^tag\/([A-Za-z0-9]{1,50})\/?(p[0-9]{1,3})?$/', $uri, $queryString)) {
+} else if ($method === 'GET' && preg_match('/^tag\/([A-Za-z0-9_]{1,50})\/?(p[0-9]{1,3})?$/', $uri, $queryString)) {
     $data['tag'] = $queryString[1];
-    if (!in_array($data['tag'], $config['tags']))
+    $isCurated = in_array($data['tag'], $config['tags']);
+    $threadIds = getHashtags($db, $baseurl)[strtolower($data['tag'])] ?? [];
+    if (!$isCurated && !$threadIds) // Only known tags, so there's a bounded set of these pages to cache
         render(404, '404', $data);
+    if (!$isCurated && $data['tag'] !== strtolower($data['tag']))
+        redirect($baseurl . 'tag/' . strtolower($data['tag']) . (isset($queryString[2]) ? '/' . $queryString[2] : ''));
+    tryRenderFromCache('index/tag'); // Cleared along with the front page
+    [$where, $params] = tagFilter($data['tag'], $isCurated, $threadIds);
     $page = (count($queryString) === 3) ? (int) substr($queryString[2], 1) : 1;
-    $data['threads'] = getThreads($db, $page, $perPage, $data['tag']);
-    $totalPages = ceil(getTotalThreads($db, $data['tag']) / $perPage);
+    $data['heading'] = 'Threads tagged: ' . $data['tag'];
+    $data['threads'] = getThreads($db, $page, $perPage, $where, $params);
+    $totalPages = ceil(getTotalThreads($db, $where, $params) / $perPage);
+    if ($page > max(1, $totalPages))
+        render(404, '404', $data);
     $data['has_pagination'] = $totalPages > 1;
     $data['pages'] = getPaginationPages($page, $totalPages);
-    render(200, 'index', $data);
+    render(200, 'index', $data, 'index/tag');
 } else if ($method === 'GET' && $uri === 'login') {
     $data['iq_question'] = $config['iqQuestion'];
     render(200, 'login', $data);

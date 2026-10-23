@@ -330,6 +330,9 @@ article .usertag {
     color: #e14658;
     border: 1px solid #f6c5cb;
 }
+article .hashtag {
+    text-decoration: none;
+}
 .spinner {
     display:inline-block;
     width:16px;
