@@ -554,9 +554,10 @@ function movePost($db, $id, $threadId)
     $query->bindValue(':thread_id', $threadId);
     $query->execute();
 
+    // The thread goes to the first approved poster: a held post's author mustn't get it
     $query = $db->prepare('
         SELECT
-            (SELECT user_id FROM posts WHERE thread_id = :thread_id ORDER BY id ASC LIMIT 1) AS first_user_id,
+            (SELECT user_id FROM posts WHERE thread_id = :thread_id ORDER BY is_approved DESC, id ASC LIMIT 1) AS first_user_id,
             (SELECT user_id FROM posts WHERE thread_id = :thread_id AND is_approved = 1 ORDER BY id DESC LIMIT 1) AS last_user_id
     ');
     $query->bindValue(':thread_id', $threadId, PDO::PARAM_INT);
@@ -1072,9 +1073,10 @@ function removePost($db, $id, $threadId)
     $query->bindValue(':id', $id);
     $query->execute();
 
+    // The thread goes to the first approved poster: a held post's author mustn't get it
     $query = $db->prepare('
         SELECT
-            (SELECT user_id FROM posts WHERE thread_id = :thread_id ORDER BY id ASC LIMIT 1) AS first_user_id,
+            (SELECT user_id FROM posts WHERE thread_id = :thread_id ORDER BY is_approved DESC, id ASC LIMIT 1) AS first_user_id,
             (SELECT user_id FROM posts WHERE thread_id = :thread_id AND is_approved = 1 ORDER BY id DESC LIMIT 1) AS last_user_id
     ');
     $query->bindValue(':thread_id', $threadId, PDO::PARAM_INT);
