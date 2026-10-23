@@ -1357,11 +1357,12 @@ function isSpam($config, $baseurl, $content)
     return false;
 }
 
+// $key names the page rather than the URL, as //p2, /p02 and /p2/ are all the same page and mustn't each be a cache miss
 function tryRenderFromCache($key): void
 {
     if (!empty($_SESSION['user_id']))
         return;
-    $html = apcu_fetch('html_' . $key . '_' . sha1(strtok($_SERVER['REQUEST_URI'], '?')));
+    $html = apcu_fetch('html_' . $key);
     if ($html !== false) {
         echo $html;
         exit;
@@ -1370,7 +1371,7 @@ function tryRenderFromCache($key): void
 
 function saveCache($key, string $html, int $ttl = 900): void
 {
-    apcu_store('html_' . $key . '_' . sha1(strtok($_SERVER['REQUEST_URI'], '?')), $html, $ttl);
+    apcu_store('html_' . $key, $html, $ttl);
 }
 
 function invalidateCache($keys)
@@ -1510,13 +1511,13 @@ foreach ([$_GET, $_POST] as $fields) {
 
 $queryString = [];
 if ($method === 'GET' && preg_match('/^(p[0-9]{1,3})?$/', $uri, $queryString)) {
-    tryRenderFromCache('index');
     $page = (count($queryString) === 2) ? (int) substr($queryString[1], 1) : 1;
+    tryRenderFromCache('index/p' . $page);
     $data['threads'] = getThreads($db, $page, $perPage);
     $totalPages = ceil(getTotalThreads($db) / $perPage);
     $data['has_pagination'] = $totalPages > 1;
     $data['pages'] = getPaginationPages($page, $totalPages);
-    render(200, 'index', $data, 'index');
+    render(200, 'index', $data, 'index/p' . $page);
 } else if ($method === 'GET' && $uri === 'tags') {
     $data['tags'] = $config['tags'];
     $data['hashtags'] = array_keys(getHashtags($db, $baseurl));
@@ -1531,9 +1532,10 @@ if ($method === 'GET' && preg_match('/^(p[0-9]{1,3})?$/', $uri, $queryString)) {
         render(404, '404', $data);
     if (!$isCurated && $data['tag'] !== strtolower($data['tag']))
         redirect($baseurl . 'tag/' . strtolower($data['tag']) . (isset($queryString[2]) ? '/' . $queryString[2] : ''));
-    tryRenderFromCache('index/tag'); // Cleared along with the front page
-    [$where, $params] = tagFilter($data['tag'], $isCurated, $threadIds);
     $page = (count($queryString) === 3) ? (int) substr($queryString[2], 1) : 1;
+    $cacheKey = 'index/tag/' . $data['tag'] . '/p' . $page; // Cleared along with the front page
+    tryRenderFromCache($cacheKey);
+    [$where, $params] = tagFilter($data['tag'], $isCurated, $threadIds);
     $data['heading'] = 'Threads tagged: ' . $data['tag'];
     $data['threads'] = getThreads($db, $page, $perPage, $where, $params);
     $totalPages = ceil(getTotalThreads($db, $where, $params) / $perPage);
@@ -1541,7 +1543,7 @@ if ($method === 'GET' && preg_match('/^(p[0-9]{1,3})?$/', $uri, $queryString)) {
         render(404, '404', $data);
     $data['has_pagination'] = $totalPages > 1;
     $data['pages'] = getPaginationPages($page, $totalPages);
-    render(200, 'index', $data, 'index/tag');
+    render(200, 'index', $data, $cacheKey);
 } else if ($method === 'GET' && $uri === 'login') {
     $data['iq_question'] = $config['iqQuestion'];
     render(200, 'login', $data);
