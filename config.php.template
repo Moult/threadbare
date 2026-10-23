@@ -17,4 +17,8 @@ return [
     'hCaptchaSecretKey' => '',
     'adminUsernames' => [],
     'trustedUsernames' => [],
+    // Behind a CDN or reverse proxy only: the header it puts the visitor's address in, e.g. 'CF-Connecting-IP' or
+    // 'X-Forwarded-For', so rate limits count visitors rather than the proxy. Anyone can send this header, so only
+    // set it when the site can't be reached except through the proxy.
+    'clientIpHeader' => '',
 ];

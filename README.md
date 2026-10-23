@@ -62,6 +62,8 @@ $ cp config.php.template config.php
 $ vim config.php # Add your API keys and set website URL
 ```
 
+Rate limits count visitors by IP address (IPv6 by /64). If the site is behind a CDN or reverse proxy, set `clientIpHeader` in `config.php` to the header the proxy puts the visitor's address in, or every visitor shares the proxy's limits.
+
 Nginx:
 
 ```
