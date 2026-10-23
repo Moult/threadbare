@@ -879,16 +879,18 @@ function getProfile($db, $id, &$data)
 function getThreads($db, $page = 1, $perPage = 20, $tag = NULL)
 {
     $results = [];
-    $sql = 'SELECT t.id, t.title, r.last_read_at, t.user_id, u.username, t.last_user_id, lu.username AS last_username, u.email, t.ts_created, t.ts_updated, count(p.id) AS total_posts, t.tags
+    // Threads are picked before their posts are counted, as counting first would count every post in the forum
+    $sql = 'SELECT t.id, t.title, r.last_read_at, t.user_id, u.username, t.last_user_id, lu.username AS last_username, u.email, t.ts_created, t.ts_updated, t.tags,
+            (SELECT COUNT(*) FROM posts WHERE thread_id = t.id AND is_approved = 1) AS total_posts
         FROM threads AS t
         LEFT JOIN users AS u ON t.user_id = u.id
         LEFT JOIN users AS lu ON t.last_user_id = lu.id
-        LEFT JOIN posts AS p ON p.thread_id = t.id AND p.is_approved = 1
-        LEFT JOIN thread_reads AS r ON r.thread_id = t.id AND r.user_id = :user_id';
+        LEFT JOIN thread_reads AS r ON r.thread_id = t.id AND r.user_id = :user_id
+        WHERE EXISTS (SELECT 1 FROM posts WHERE thread_id = t.id AND is_approved = 1)'; // A held new thread has no approved posts
     if ($tag !== NULL) {
-        $sql .= " WHERE ',' || t.tags || ',' LIKE :tag"; // Whole tags only: intro must not match introduction
+        $sql .= " AND ',' || t.tags || ',' LIKE :tag"; // Whole tags only: intro must not match introduction
     }
-    $sql .= ' GROUP BY t.id HAVING count(p.id) > 0 ORDER BY t.ts_updated DESC LIMIT :limit OFFSET :offset'; // A held new thread has no approved posts
+    $sql .= ' ORDER BY t.ts_updated DESC LIMIT :limit OFFSET :offset';
     $query = $db->prepare($sql);
     if ($tag !== NULL) {
         $query->bindValue(':tag', '%,' . $tag . ',%', PDO::PARAM_STR);
