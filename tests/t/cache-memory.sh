@@ -11,7 +11,7 @@ if [ -f "$WORK/apcu.json" ]; then
   check "cache stays under three quarters full" "$(( $(stat -c %s "$WORK/apcu.json") < 80000 ))" 1
   check "but has pages in it" "$(grep -c 'html_thread' "$WORK/apcu.json")" 1
 fi
-t=$(csrf g login)
+unlimit; t=$(csrf g login)  # the guest requests above used up the new sessions for this address
 for i in 1 2 3 4 5; do C -b "$(J g)" -o /dev/null --data-urlencode "csrf=$t" -d username=alice -d password=wrong-password $B/login; done
 check "rate limits still work" "$(C -b "$(J g)" -o /dev/null -w '%{http_code}' --data-urlencode "csrf=$t" -d username=alice -d password=wrong-password $B/login)" 429
 finish
