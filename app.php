@@ -522,9 +522,10 @@ function updatePassword($db, $id)
 
 function updatePost($db, $id)
 {
-    $query = $db->prepare('UPDATE posts SET content = :content, ts_updated = :ts_updated WHERE id = :id LIMIT 1');
+    $query = $db->prepare('UPDATE posts SET content = :content, html = :html, ts_updated = :ts_updated WHERE id = :id LIMIT 1');
     $query->bindValue(':id', $id);
     $query->bindValue(':content', $_POST['content']);
+    $query->bindValue(':html', renderPost($_POST['content']));
     $query->bindValue(':ts_updated', time());
     $query->execute();
     expireHashtags(); // The edit may have added or removed some
@@ -622,6 +623,8 @@ function validatePost($config, $baseurl, &$errors)
 {
     if (!isset($_POST['content']) || !is_string($_POST['content']) || strlen($_POST['content']) < 1 || strlen($_POST['content']) > 5000) {
         $errors[] = 'Post content must not be blank or exceed 5000 characters.';
+    } else if (strlen(renderPost($_POST['content'])) > POST_HTML_MAX) {
+        $errors[] = 'Post formatting is too complicated to show. Please simplify it.';
     } else if (!in_array($_SESSION['username'], $config['adminUsernames']) && !in_array($_SESSION['username'], $config['trustedUsernames']) && isSpam($config, $baseurl, $_POST['content'])) {
         $errors[] = 'Post body looks spamlike. Please reach out for help in the live chat.';
     }
@@ -641,10 +644,11 @@ function addThread($db)
 
 function addPost($db, $threadId, $isApproved)
 {
-    $query = $db->prepare('INSERT INTO posts(thread_id, user_id, content, ts_created, ts_updated, is_approved) VALUES(:thread_id, :user_id, :content, :ts_created, :ts_updated, :is_approved)');
+    $query = $db->prepare('INSERT INTO posts(thread_id, user_id, content, html, ts_created, ts_updated, is_approved) VALUES(:thread_id, :user_id, :content, :html, :ts_created, :ts_updated, :is_approved)');
     $query->bindValue(':thread_id', $threadId);
     $query->bindValue(':user_id', $_SESSION['user_id']);
     $query->bindValue(':content', $_POST['content']);
+    $query->bindValue(':html', renderPost($_POST['content']));
     $query->bindValue(':ts_created', time());
     $query->bindValue(':ts_updated', time());
     $query->bindValue(':is_approved', $isApproved ? 1 : 0, PDO::PARAM_INT);
@@ -1006,7 +1010,7 @@ function getThread($config, $db, $threadId, $page, $perPage, &$data)
     $data['posts'] = [];
 
     $query = $db->prepare('
-        SELECT p.id, p.content, p.thread_id, p.user_id, u.username, u.email, p.ts_created, p.ts_updated, p.is_approved,
+        SELECT p.id, p.content, p.html, p.thread_id, p.user_id, u.username, u.email, p.ts_created, p.ts_updated, p.is_approved,
             SUM(CASE WHEN v.value = -1 THEN 1 ELSE 0 END) AS flags,
             MAX(CASE WHEN v.user_id = :user_id THEN v.value ELSE NULL END) AS user_vote
         FROM posts AS p
@@ -1023,8 +1027,9 @@ function getThread($config, $db, $threadId, $page, $perPage, &$data)
     $query->bindValue(':limit', $perPage, PDO::PARAM_INT);
     $query->bindValue(':offset', ($page - 1) * $perPage, PDO::PARAM_INT);
     $query->execute();
-    while ($row = $query->fetch()) {
-        $content = linkHashtags(renderPost($row['content']), $config['baseurl']);
+    foreach ($query->fetchAll() as $row) {
+        $content = linkHashtags($row['html'] ?? storePostHtml($db, $row['id'], $row['content']), $config['baseurl']);
+        unset($row['html']);
         $row['can_vote'] = !empty($_SESSION['user_id']) && $_SESSION['user_id'] !== $row['user_id'] && $row['is_approved'];
         $row['is_pending'] = !$row['is_approved'];
         $row['user_vote_is_upvoted'] = $row['user_vote'] === 1;
@@ -1068,6 +1073,20 @@ function addReactions($db, &$posts)
     }
 }
 
+const POST_HTML_MAX = 50000; // A post's HTML, ten times its longest Markdown; some Markdown (5000 >s) makes far more
+
+// Posts are rendered when they're saved, as some Markdown takes a while. To render them again, for instance after
+// changing how they render, set posts.html to NULL: each is then rendered and saved the next time it's shown.
+function storePostHtml($db, $id, $content)
+{
+    $html = renderPost($content);
+    $query = $db->prepare('UPDATE posts SET html = :html WHERE id = :id');
+    $query->bindValue(':html', $html);
+    $query->bindValue(':id', $id);
+    $query->execute();
+    return $html;
+}
+
 function renderPost($content)
 {
     $Parsedown = new ForumMarkdown();
@@ -1109,16 +1128,16 @@ function getHashtags($db, $baseurl)
         return $cached['tags'];
     if (!apcu_add('hashtags_lock', 1, 30)) // Another request is rebuilding it: use the old list meanwhile
         return $cached['tags'] ?? [];
-    $query = $db->prepare('SELECT thread_id, content FROM posts WHERE is_approved = 1 ORDER BY id DESC LIMIT :limit');
+    $query = $db->prepare('SELECT id, thread_id, content, html FROM posts WHERE is_approved = 1 ORDER BY id DESC LIMIT :limit');
     $query->bindValue(':limit', HASHTAG_POSTS, PDO::PARAM_INT);
     $query->execute();
     $uses = [];
     $threads = [];
-    while ($row = $query->fetch()) {
+    foreach ($query->fetchAll() as $row) {
         if (!str_contains($row['content'], '#'))
             continue;
         $tags = [];
-        linkHashtags(renderPost($row['content']), $baseurl, $tags);
+        linkHashtags($row['html'] ?? storePostHtml($db, $row['id'], $row['content']), $baseurl, $tags);
         foreach (array_unique($tags) as $tag) {
             $uses[$tag] = ($uses[$tag] ?? 0) + 1;
             $threads[$tag][$row['thread_id']] = TRUE;

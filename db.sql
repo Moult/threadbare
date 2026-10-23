@@ -42,6 +42,7 @@ CREATE TABLE "posts" (
 	"thread_id"	INTEGER NOT NULL,
 	"user_id"	INTEGER NOT NULL,
 	"content"	TEXT NOT NULL,
+	"html"	TEXT,
 	"ts_created"	INTEGER NOT NULL,
 	"ts_updated"	INTEGER NOT NULL,
 	"is_approved"	INTEGER NOT NULL DEFAULT 1,
