@@ -43,6 +43,14 @@ CREATE TABLE "posts" (
     FOREIGN KEY("user_id") REFERENCES "users"("id") ON DELETE CASCADE
 );
 
+CREATE TABLE "uploads" (
+	"path"	TEXT NOT NULL UNIQUE,
+	"user_id"	INTEGER NOT NULL,
+	"ts_created"	INTEGER NOT NULL,
+	PRIMARY KEY("path")
+    FOREIGN KEY("user_id") REFERENCES "users"("id") ON DELETE CASCADE
+);
+
 CREATE TABLE "thread_reads" (
 	"user_id"	INTEGER NOT NULL,
 	"thread_id"	INTEGER NOT NULL,
