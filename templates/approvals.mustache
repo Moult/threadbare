@@ -26,6 +26,9 @@
     </li>
 {{/pending}}
 </ol>
+{{#more_pending}}
+<p>These are the first 100 of {{pending_count}} posts. Approving or deleting a user clears all of their posts.</p>
+{{/more_pending}}
 <h2 id="flagged">Flagged</h2>
 <p>Members can flag a post as offensive. Flags are anonymous: nobody, not even admins, can see who flagged a post. Edit or delete the post, or dismiss its flags if it's fine.</p>
 {{^flagged}}
@@ -48,3 +51,6 @@
     </li>
 {{/flagged}}
 </ol>
+{{#more_flagged}}
+<p>These are the 100 most flagged of {{flagged_count}} posts.</p>
+{{/more_flagged}}

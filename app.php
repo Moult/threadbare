@@ -743,7 +743,8 @@ function getFlaggedPosts($db)
         JOIN threads AS t ON p.thread_id = t.id
         WHERE v.value = -1
         GROUP BY p.id
-        ORDER BY flags DESC, p.id DESC');
+        ORDER BY flags DESC, p.id DESC
+        LIMIT 100'); // A page an admin can work through, however many there are
     $results = [];
     while ($row = $query->fetch(PDO::FETCH_ASSOC)) {
         $row['ts_created'] = date('j M Y H:i', $row['ts_created']);
@@ -760,7 +761,8 @@ function getPendingPosts($db)
         JOIN users AS u ON p.user_id = u.id
         JOIN threads AS t ON p.thread_id = t.id
         WHERE p.is_approved = 0
-        ORDER BY p.id ASC');
+        ORDER BY p.id ASC
+        LIMIT 100'); // A page an admin can work through, even during a wave of spam
     $results = [];
     while ($row = $query->fetch(PDO::FETCH_ASSOC)) {
         $row['ts_created'] = date('j M Y H:i', $row['ts_created']);
@@ -1884,6 +1886,8 @@ if ($method === 'GET' && preg_match('/^(p[0-9]{1,3})?$/', $uri, $queryString)) {
         render(403, '403', $data);
     $data['pending'] = getPendingPosts($db);
     $data['flagged'] = getFlaggedPosts($db);
+    $data['more_pending'] = $data['pending_count'] > count($data['pending']);
+    $data['more_flagged'] = $data['flagged_count'] > count($data['flagged']);
     render(200, 'approvals', $data);
 } else if ($method === 'POST' && preg_match('/^approvals\/(approve|reject-post|delete-user|dismiss-flags)\/([0-9]{1,100})$/', $uri, $queryString)) {
     if (!isAdmin($config))
