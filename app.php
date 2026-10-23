@@ -1788,6 +1788,7 @@ if ($method === 'GET' && preg_match('/^(p[0-9]{1,3})?$/', $uri, $queryString)) {
     if (!$data['is_logged_in'])
         redirect($baseurl . 'login');
     checkCsrf($data);
+    checkRateLimit($config, $data, 'post', 5, 10); // Attempts too, as checking one for spam calls Akismet
     $page = (count($queryString) === 4) ? (int) substr($queryString[3], 1) : 1;
     $threadId = (int) $queryString[1];
     if (getTotalPosts($config, $db, $threadId) === 0) // Missing, or a held thread the user can't see
@@ -1829,6 +1830,7 @@ if ($method === 'GET' && preg_match('/^(p[0-9]{1,3})?$/', $uri, $queryString)) {
     $data['title'] = $_POST['title'];
     $data['errors'] = [];
     checkCsrf($data);
+    checkRateLimit($config, $data, 'post', 5, 10); // Attempts too, as checking one for spam calls Akismet
     validateThread($config, $baseurl, $data['errors']);
     if (count($data['errors']) === 0) {
         checkRateLimit($config, $data, 'threadedit', 5, 300);
@@ -1854,6 +1856,7 @@ if ($method === 'GET' && preg_match('/^(p[0-9]{1,3})?$/', $uri, $queryString)) {
     $data['content'] = $_POST['content'];
     $data['errors'] = [];
     checkCsrf($data);
+    checkRateLimit($config, $data, 'post', 5, 10); // Attempts too, as checking one for spam calls Akismet
     validatePost($config, $baseurl, $data['errors']);
     if (count($data['errors']) === 0) {
         checkRateLimit($config, $data, 'postedit', 5, 300);
@@ -1954,6 +1957,7 @@ if ($method === 'GET' && preg_match('/^(p[0-9]{1,3})?$/', $uri, $queryString)) {
     if (!$data['is_logged_in'])
         redirect($baseurl . 'login');
     checkCsrf($data);
+    checkRateLimit($config, $data, 'vote', 30, 60);
     $postId = isset($_POST['post_id']) ? (int) $_POST['post_id'] : 0;
     $query = $db->prepare('SELECT id FROM posts WHERE id = :id AND user_id != :user_id AND is_approved = 1 LIMIT 1');
     $query->bindValue(':user_id', $_SESSION['user_id']);
@@ -1972,6 +1976,7 @@ if ($method === 'GET' && preg_match('/^(p[0-9]{1,3})?$/', $uri, $queryString)) {
 } else if ($method === 'GET' && preg_match('/^mention(\/[0-9]{1,50})?\/@([A-Za-z0-9_-]{1,100})$/', $uri, $queryString)) {
     if (!$data['is_logged_in'])
         render(403, '403', $data);
+    checkRateLimit($config, $data, 'mention', 60, 60); // Plenty for autocomplete as someone types
     header('Content-Type: application/json');
     $query = str_replace('_', '\_', $queryString[2]) . '%'; // _ is a LIKE wildcard but valid in usernames
     $results = [];
@@ -1994,6 +1999,7 @@ if ($method === 'GET' && preg_match('/^(p[0-9]{1,3})?$/', $uri, $queryString)) {
         redirect($baseurl . 'login');
     if ($method === 'POST') {
         checkCsrf($data);
+        checkRateLimit($config, $data, 'notifications', 10, 60);
         $query = $db->prepare('UPDATE users SET notifications = NOT notifications WHERE id = :id LIMIT 1');
         $query->bindValue(':id', $_SESSION['user_id'], PDO::PARAM_INT);
         $query->execute();
