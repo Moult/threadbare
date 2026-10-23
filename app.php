@@ -76,12 +76,32 @@ function checkCsrf(&$data)
     render(403, '403', $data);
 }
 
+// The visitor's address. Behind a CDN or reverse proxy REMOTE_ADDR is the proxy's, so it comes from the header the proxy sets
+function clientIp($config)
+{
+    $header = $config['clientIpHeader'] ?? '';
+    if ($header !== '') {
+        $addresses = explode(',', $_SERVER['HTTP_' . strtoupper(str_replace('-', '_', $header))] ?? '');
+        $ip = trim(end($addresses)); // The last one is the address the proxy saw; earlier ones are whatever the client sent
+        if (filter_var($ip, FILTER_VALIDATE_IP))
+            return $ip;
+    }
+    return $_SERVER['REMOTE_ADDR'];
+}
+
+// Who rate limits count: an IPv6 visitor by their /64, as one connection usually has all of it
+function clientKey($config)
+{
+    $ip = clientIp($config);
+    return str_contains($ip, ':') ? bin2hex(substr(inet_pton($ip), 0, 8)) : $ip;
+}
+
 function checkRateLimit($config, $data, $key = 'login', $limit = 3, $window = 300)
 {
     if (isset($_SESSION['username']) && in_array($_SESSION['username'], $config['adminUsernames']))
         return;
     $now = time();
-    $rateKey = 'ratelimit_' . md5($config['salt'] . $_SERVER['REMOTE_ADDR'] . $key);
+    $rateKey = 'ratelimit_' . md5($config['salt'] . clientKey($config) . $key);
     $record = apcu_fetch($rateKey);
     if (!$record) {
         $record = ['attempts' => 1, 'time' => $now];
@@ -1323,7 +1343,7 @@ function isSpam($config, $baseurl, $content)
 {
     $request = 'api_key=' . urlencode($config['akismetKey'])
         . '&blog=' . urlencode($baseurl)
-        . '&user_ip=' . urlencode($_SERVER['REMOTE_ADDR'])
+        . '&user_ip=' . urlencode(clientIp($config))
         . '&user_agent=' . urlencode($_SERVER['HTTP_USER_AGENT'] ?? '')
         . '&referrer=' . urlencode($_SERVER['HTTP_REFERER'] ?? '')
         . '&comment_type=comment'
