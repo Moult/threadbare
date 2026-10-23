@@ -1923,6 +1923,15 @@ if ($method === 'GET' && preg_match('/^(p[0-9]{1,3})?$/', $uri, $queryString)) {
         redirect($baseurl . 'login');
     checkCsrf($data);
     checkRateLimit($config, $data, 'upload', 10, 300);
+    // Files nobody has vetted could fill the disk: none from users awaiting approval, and 20 a day from anyone else
+    if (!isApproved($config, $db))
+        render(403, '403', $data);
+    $query = $db->prepare('SELECT COUNT(*) FROM uploads WHERE user_id = :user_id AND ts_created > :since');
+    $query->bindValue(':user_id', $_SESSION['user_id']);
+    $query->bindValue(':since', time() - 86400);
+    $query->execute();
+    if ($query->fetchColumn() >= 20 && !isAdmin($config))
+        render(429, '429', $data);
     $data['filename'] = handleUpload($config, $db, $data);
     if (!isset($_POST['useJS']))
         render(200, 'upload', $data);
