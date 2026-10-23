@@ -17,26 +17,23 @@
             {{#can_edit}}
             <a href="{{baseurl}}post/edit/{{id}}">edit</a>
             {{/can_edit}}
-            {{#has_votes}}
-            {{#upvotes}}+{{upvotes}}{{/upvotes}} {{#downvotes}}-{{downvotes}}{{/downvotes}} votes {{rabbits}}
-            {{/has_votes}}
-            {{#user_vote}}
-            {{#user_upvote}}
-            &blacktriangle;
-            {{/user_upvote}}
-            {{^user_upvote}}
-            &blacktriangledown;
-            {{/user_upvote}}
-            {{/user_vote}}
             {{#can_vote}}
             <form action="{{baseurl}}vote" method="post" class="vote-form">
               <input type="hidden" name="csrf" value="{{csrf}}">
               <input type="hidden" name="post_id" value="{{id}}">
               <input type="hidden" name="page" value="{{page}}">
-              <button name="vote" value="1" aria-pressed="{{#user_vote_is_upvoted}}true{{/user_vote_is_upvoted}}{{^user_vote_is_upvoted}}false{{/user_vote_is_upvoted}}">&blacktriangle;</button>
-              <button name="vote" value="-1" aria-pressed="{{#user_vote_is_downvoted}}true{{/user_vote_is_downvoted}}{{^user_vote_is_downvoted}}false{{/user_vote_is_downvoted}}">&blacktriangledown;</button>
+              <button name="vote" value="1" title="React" aria-pressed="{{#user_vote_is_upvoted}}true{{/user_vote_is_upvoted}}{{^user_vote_is_upvoted}}false{{/user_vote_is_upvoted}}">&#x1F5A4;</button>
+              <button name="vote" value="-1" title="Flag as offensive: only admins see flags, and not who sent them" aria-pressed="{{#user_vote_is_downvoted}}true{{/user_vote_is_downvoted}}{{^user_vote_is_downvoted}}false{{/user_vote_is_downvoted}}">&#x2691;</button>
             </form>
             {{/can_vote}}
+            {{#flags}}
+            <a href="{{baseurl}}approvals#flagged"><strong>&#x2691; {{flags}} flagged</strong></a>
+            {{/flags}}
+            {{#has_reactions}}
+            <span class="reactions">&#x1F5A4;
+              {{#reactions}}<a href="{{baseurl}}profile/{{user_id}}" class="avatar {{avatar}}" title="{{username}}" aria-label="{{username}}">{{initial}}</a>{{/reactions}}
+            </span>
+            {{/has_reactions}}
         </span>
         <article>
             {{{content}}}

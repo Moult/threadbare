@@ -47,6 +47,7 @@ if (isset($_SESSION['username'])) {
 if (isAdmin($config)) {
     $data['is_admin'] = TRUE;
     $data['pending_count'] = (int) $db->query('SELECT COUNT(*) FROM posts WHERE is_approved = 0')->fetchColumn();
+    $data['flagged_count'] = (int) $db->query('SELECT COUNT(DISTINCT post_id) FROM votes WHERE value = -1')->fetchColumn();
 }
 
 function isAdmin($config)
@@ -727,6 +728,26 @@ function approveUser($config, $db, $userId)
     }
 }
 
+// Posts people have flagged, most flagged first. Who flagged them isn't shown, not even to admins
+function getFlaggedPosts($db)
+{
+    $query = $db->query('
+        SELECT p.id, p.content, p.thread_id, p.user_id, p.ts_created, u.username, t.title, COUNT(*) AS flags
+        FROM votes AS v
+        JOIN posts AS p ON v.post_id = p.id
+        JOIN users AS u ON p.user_id = u.id
+        JOIN threads AS t ON p.thread_id = t.id
+        WHERE v.value = -1
+        GROUP BY p.id
+        ORDER BY flags DESC, p.id DESC');
+    $results = [];
+    while ($row = $query->fetch(PDO::FETCH_ASSOC)) {
+        $row['ts_created'] = date('j M Y H:i', $row['ts_created']);
+        $results[] = $row;
+    }
+    return $results;
+}
+
 function getPendingPosts($db)
 {
     $query = $db->query('
@@ -970,8 +991,7 @@ function getThread($config, $db, $threadId, $page, $perPage, &$data)
 
     $query = $db->prepare('
         SELECT p.id, p.content, p.thread_id, p.user_id, u.username, u.email, p.ts_created, p.ts_updated, p.is_approved,
-            SUM(CASE WHEN v.value = 1 THEN 1 ELSE 0 END) AS upvotes,
-            SUM(CASE WHEN v.value = -1 THEN 1 ELSE 0 END) AS downvotes,
+            SUM(CASE WHEN v.value = -1 THEN 1 ELSE 0 END) AS flags,
             MAX(CASE WHEN v.user_id = :user_id THEN v.value ELSE NULL END) AS user_vote
         FROM posts AS p
         LEFT JOIN users AS u ON p.user_id = u.id
@@ -995,13 +1015,10 @@ function getThread($config, $db, $threadId, $page, $perPage, &$data)
         $content = $Parsedown->text($content);
         $content = postProcessMentions($content);
         $row['can_vote'] = !empty($_SESSION['user_id']) && $_SESSION['user_id'] !== $row['user_id'] && $row['is_approved'];
-        $row['has_votes'] = $row['upvotes'] || $row['downvotes'];
         $row['is_pending'] = !$row['is_approved'];
-        $row['rabbits'] = str_repeat('🐇', max(0, $row['upvotes'] - $row['downvotes']));
-        $row['user_upvote'] = $row['user_vote'] === 1;
         $row['user_vote_is_upvoted'] = $row['user_vote'] === 1;
         $row['user_vote_is_downvoted'] = $row['user_vote'] === -1;
-        $row['user_vote'] = $row['user_vote'] !== NULL;
+        $row['flags'] = isAdmin($config) ? $row['flags'] : 0; // Flags are anonymous, and only admins see how many
         $row['ts_updated'] = $row['ts_updated'] > $row['ts_created'] + 5 ? date('j M Y', $row['ts_updated']) : '';
         $row['ts_created'] = date('j M Y', $row['ts_created']);
         $row['avatar'] = avatar($row['username']);
@@ -1009,6 +1026,34 @@ function getThread($config, $db, $threadId, $page, $perPage, &$data)
         $row['content'] = $content;
         $row['can_edit'] = isset($_SESSION['user_id']) ? $row['user_id'] === $_SESSION['user_id'] || in_array($_SESSION['username'], $config['adminUsernames']) : FALSE;
         $data['posts'][] = $row;
+    }
+    addReactions($db, $data['posts']);
+}
+
+// Lists who reacted to each post, in the order they reacted. Flags (down votes) are left out: they're anonymous
+function addReactions($db, &$posts)
+{
+    $index = [];
+    foreach ($posts as $i => $post) {
+        $posts[$i]['reactions'] = [];
+        $index[$post['id']] = $i;
+    }
+    if (!$index)
+        return;
+    $query = $db->prepare('
+        SELECT v.post_id, u.id AS user_id, u.username FROM votes AS v JOIN users AS u ON v.user_id = u.id
+        WHERE v.value = 1 AND v.post_id IN (' . implode(',', array_fill(0, count($index), '?')) . ') ORDER BY v.rowid');
+    $query->execute(array_keys($index));
+    while ($row = $query->fetch()) {
+        $posts[$index[$row['post_id']]]['reactions'][] = [
+            'user_id' => $row['user_id'],
+            'username' => $row['username'],
+            'avatar' => avatar($row['username']),
+            'initial' => strtoupper($row['username'][0]),
+        ];
+    }
+    foreach ($posts as $i => $post) {
+        $posts[$i]['has_reactions'] = (bool) $post['reactions'];
     }
 }
 
@@ -1739,8 +1784,9 @@ if ($method === 'GET' && preg_match('/^(p[0-9]{1,3})?$/', $uri, $queryString)) {
     if (!isAdmin($config))
         render(403, '403', $data);
     $data['pending'] = getPendingPosts($db);
+    $data['flagged'] = getFlaggedPosts($db);
     render(200, 'approvals', $data);
-} else if ($method === 'POST' && preg_match('/^approvals\/(approve|reject-post|delete-user)\/([0-9]{1,100})$/', $uri, $queryString)) {
+} else if ($method === 'POST' && preg_match('/^approvals\/(approve|reject-post|delete-user|dismiss-flags)\/([0-9]{1,100})$/', $uri, $queryString)) {
     if (!isAdmin($config))
         render(403, '403', $data);
     checkCsrf($data);
@@ -1754,6 +1800,10 @@ if ($method === 'GET' && preg_match('/^(p[0-9]{1,3})?$/', $uri, $queryString)) {
         $threadId = $query->fetchColumn();
         if ($threadId)
             removePost($db, $id, $threadId);
+    } else if ($queryString[1] === 'dismiss-flags') {
+        $query = $db->prepare('DELETE FROM votes WHERE post_id = :id AND value = -1');
+        $query->bindValue(':id', $id);
+        $query->execute();
     } else {
         // Only for accounts awaiting approval: other accounts are deleted from their profile
         $query = $db->prepare('SELECT username FROM users WHERE id = :id AND is_approved = 0 LIMIT 1');
