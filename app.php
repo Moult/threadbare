@@ -142,6 +142,8 @@ function checkCaptcha($config)
     curl_setopt($verify, CURLOPT_POST, true);
     curl_setopt($verify, CURLOPT_POSTFIELDS, http_build_query($request));
     curl_setopt($verify, CURLOPT_RETURNTRANSFER, true);
+    curl_setopt($verify, CURLOPT_CONNECTTIMEOUT, 5); // A request waiting on a slow service holds a PHP worker
+    curl_setopt($verify, CURLOPT_TIMEOUT, 10);
     $response = curl_exec($verify);
     $responseData = json_decode($response);
     return !empty($responseData->success);
@@ -323,6 +325,8 @@ function sendEmail($config, $to, $subject, $content)
         $ch = curl_init();
         curl_setopt($ch, CURLOPT_URL, 'https://api.sendgrid.com/v3/mail/send');
         curl_setopt($ch, CURLOPT_RETURNTRANSFER, true);
+        curl_setopt($ch, CURLOPT_CONNECTTIMEOUT, 5); // A request waiting on a slow service holds a PHP worker
+        curl_setopt($ch, CURLOPT_TIMEOUT, 10);
         curl_setopt($ch, CURLOPT_CUSTOMREQUEST, 'POST');
         curl_setopt($ch, CURLOPT_HTTPHEADER, [
             'Authorization: Bearer ' . $config['sendGridKey'], 'Content-Type: application/json'
@@ -1344,9 +1348,11 @@ function isSpam($config, $baseurl, $content)
     $http_request .= $request;
 
     $response = '';
-    if (false != ($fs = @fsockopen('ssl://' . $http_host, $port, $errno, $errstr, 10))) {
+    if (false != ($fs = @fsockopen('ssl://' . $http_host, $port, $errno, $errstr, 5))) {
+        stream_set_timeout($fs, 10);
+        $deadline = time() + 10; // However slowly Akismet answers, as a request waiting on it holds a PHP worker
         fwrite($fs, $http_request);
-        while (!feof($fs)) {
+        while (!feof($fs) && time() < $deadline && !stream_get_meta_data($fs)['timed_out']) {
             $response .= fgets($fs, 1160);  // One TCP-IP packet
         }
         fclose($fs);
