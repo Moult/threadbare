@@ -1,12 +1,12 @@
-{{#tag}}
-<h2>Threads tagged: {{tag}}</h2>
-{{/tag}}
-{{^tag}}
+{{#heading}}
+<h2>{{heading}}</h2>
+{{/heading}}
+{{^heading}}
 <p>
     Welcome to the <strong>{{h1}}</strong>
 </p>
 <p>{{blurb}}</p>
-{{/tag}}
+{{/heading}}
 <ol class="threads">
     {{#threads}}
     <li class="thread{{#is_unread}} unread{{/is_unread}}">
