@@ -890,6 +890,8 @@ function getThread($config, $db, $threadId, $page, $perPage, &$data)
         $row['has_votes'] = $row['upvotes'] || $row['downvotes'];
         $row['rabbits'] = str_repeat('🐇', max(0, $row['upvotes'] - $row['downvotes']));
         $row['user_upvote'] = $row['user_vote'] === 1;
+        $row['user_vote_is_upvoted'] = $row['user_vote'] === 1;
+        $row['user_vote_is_downvoted'] = $row['user_vote'] === -1;
         $row['user_vote'] = $row['user_vote'] !== NULL;
         $row['ts_updated'] = $row['ts_updated'] > $row['ts_created'] + 5 ? date('j M Y', $row['ts_updated']) : '';
         $row['ts_created'] = date('j M Y', $row['ts_created']);
