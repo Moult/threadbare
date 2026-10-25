@@ -446,6 +446,8 @@ function checkVerificationCode($config, $db, $code, $purpose)
     $userId = $query->fetchColumn(0);
     if (!$userId)
         return FALSE;
+    if (isset($_SESSION['user_id']) && (int) $userId !== (int) $_SESSION['user_id'])
+        return FALSE; // A code only works for its owner: being logged in as someone else doesn't make it yours
     return $userId;
 }
 
