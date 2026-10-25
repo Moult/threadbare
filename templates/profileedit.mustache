@@ -3,6 +3,9 @@
 {{#is_valid_code}}
 {{#is_success}}
 <p>Your profile has been updated.</p>
+{{#is_email_pending}}
+<p>We've sent a link to your new email address. Your email will change once you click it.</p>
+{{/is_email_pending}}
 {{/is_success}}
 {{^is_success}}
 {{#has_errors}}

@@ -144,6 +144,9 @@ nav .logout button:hover {
     display: inline-block;
     background-color: #f3f6f9;
 }
+.post button[name="vote"][aria-pressed="true"] {
+    background-color: #e7edf3;
+}
 .post button[name="vote"]:hover {
     background-color: #e7edf3;
     background-color: #e14658;

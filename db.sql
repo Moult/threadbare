@@ -7,12 +7,17 @@ CREATE TABLE "users" (
 	"notifications"	INTEGER NOT NULL DEFAULT 1,
 	"session_token"	TEXT,
 	"bio"	TEXT,
+	"pending_email"	TEXT,
+	"pending_email_code"	TEXT UNIQUE,
+	"pending_email_ts"	INTEGER,
 	PRIMARY KEY("id" AUTOINCREMENT)
 );
 
 CREATE TABLE "verifications" (
 	"code"	TEXT NOT NULL UNIQUE,
 	"user_id"	INTEGER NOT NULL,
+	"purpose"	TEXT NOT NULL DEFAULT '',
+	"ts_created"	INTEGER NOT NULL DEFAULT 0,
 	PRIMARY KEY("code")
     FOREIGN KEY("user_id") REFERENCES "users"("id") ON DELETE CASCADE
 );
@@ -43,6 +48,14 @@ CREATE TABLE "posts" (
     FOREIGN KEY("user_id") REFERENCES "users"("id") ON DELETE CASCADE
 );
 
+CREATE TABLE "uploads" (
+	"path"	TEXT NOT NULL UNIQUE,
+	"user_id"	INTEGER NOT NULL,
+	"ts_created"	INTEGER NOT NULL,
+	PRIMARY KEY("path")
+    FOREIGN KEY("user_id") REFERENCES "users"("id") ON DELETE CASCADE
+);
+
 CREATE TABLE "thread_reads" (
 	"user_id"	INTEGER NOT NULL,
 	"thread_id"	INTEGER NOT NULL,
@@ -58,3 +71,7 @@ CREATE TABLE votes (
     FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE,
     FOREIGN KEY (post_id) REFERENCES posts(id) ON DELETE CASCADE
 );
+
+CREATE INDEX posts_thread_id ON posts(thread_id);
+CREATE INDEX posts_user_id ON posts(user_id);
+CREATE INDEX votes_post_id ON votes(post_id);
