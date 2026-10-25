@@ -1041,7 +1041,8 @@ function handleUpload($config, $db, $data)
 function recordThreadView($db, $threadId)
 {
     $key = "viewed_thread_$threadId";
-    if (!isset($_SESSION[$key])) {
+    // Only count clients that send the session cookie back: one that never does (most bots) would be a new view, and a write, on every request
+    if (!isset($_SESSION[$key]) && isset($_COOKIE[session_name()])) {
         $_SESSION[$key] = true;
         $query = $db->prepare('UPDATE threads SET views = views + 1 WHERE id = ?');
         $query->execute([$threadId]);
@@ -1472,13 +1473,13 @@ if ($method === 'GET' && preg_match('/^(p[0-9]{1,3})?$/', $uri, $queryString)) {
     $page = (count($queryString) === 4) ? (int) substr($queryString[3], 1) : 1;
     $threadId = (int) $queryString[1];
     $cacheKey = 'thread/' . $threadId . '/p' . $page;
+    recordThreadView($db, $threadId); // Before the cache, so guests served from it are counted too
     tryRenderFromCache($cacheKey);
     getThread($config, $db, $threadId, $page, $perPage, $data);
     $totalPages = ceil(getTotalPosts($db, $threadId) / $perPage);
     $data['page'] = $page;
     $data['has_pagination'] = $totalPages > 1;
     $data['pages'] = getPaginationPages($page, $totalPages);
-    recordThreadView($db, $threadId);
     if ($data['is_logged_in']) {
         markThreadAsRead($db, $threadId);
     }
@@ -1620,6 +1621,7 @@ if ($method === 'GET' && preg_match('/^(p[0-9]{1,3})?$/', $uri, $queryString)) {
         addVote($db, $postId, $vote);
     }
     $threadId = getThreadId($db, $postId);
+    invalidateCache(['thread/' . $threadId . '/p']);
     redirect($baseurl . 'thread/' . $threadId . '/p' . $page . '#' . $postId);
 } else if ($method === 'GET' && preg_match('/^mention(\/[0-9]{1,50})?\/@([A-Za-z0-9_-]{1,100})$/', $uri, $queryString)) {
     if (!$data['is_logged_in'])
