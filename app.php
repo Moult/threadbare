@@ -145,8 +145,10 @@ function validateLogin($db)
         $query->bindParam(':email', $_POST['username']);
         $query->execute();
         $row = $query->fetch();
-        if (!$row)
+        if (!$row) {
+            password_hash($_POST['password'], PASSWORD_DEFAULT); // As slow as a wrong password, so timing doesn't reveal which accounts exist
             return FALSE;
+        }
         if (password_verify($_POST['password'], $row['password']))
             return $row;
     }
