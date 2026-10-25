@@ -164,7 +164,7 @@ function login($db, $user)
     }
 }
 
-function validateProfile($config, $baseurl)
+function validateProfile($config, $baseurl, $db, $userId)
 {
     $errors = [];
     if (!isset($_POST['email']) || !is_string($_POST['email']) || strlen($_POST['email']) < 3 || strlen($_POST['email']) > 50) {
@@ -175,6 +175,8 @@ function validateProfile($config, $baseurl)
         $_POST['email'] = $email;
         if (!filter_var($email, FILTER_VALIDATE_EMAIL)) {
             $errors[] = 'Email is not valid.';
+        } else if (isEmailTaken($db, $email, $userId)) {
+            $errors[] = 'Email is already in use.';
         }
     }
     if (!isset($_POST['bio']) || !is_string($_POST['bio']) || strlen($_POST['bio']) > 500) {
@@ -344,6 +346,15 @@ function sendProfileEmail($config, $email, $code)
     return sendEmail($config, $to, 'Edit ' . $config['websiteTitle'] . ' Profile', $content);
 }
 
+function sendEmailChangeEmail($config, $email, $code)
+{
+    $email = filter_var($email, FILTER_SANITIZE_EMAIL);
+    $url = $config['baseurl'] . 'email/' . $code;
+    $content = "To use this address for your account, click the link below. If this wasn't you, ignore this email.\n\n" . $url;
+    $to = [["to" => [["email" => $email]]]];
+    return sendEmail($config, $to, 'Confirm your ' . $config['websiteTitle'] . ' email', $content);
+}
+
 function sendNotificationEmails($config, $db, $threadId)
 {
     $emails = [];
@@ -422,17 +433,62 @@ function checkVerificationCode($config, $db, $code)
     return $userId;
 }
 
+function isEmailTaken($db, $email, $userId)
+{
+    $query = $db->prepare('SELECT COUNT(id) FROM users WHERE email = :email AND id != :id');
+    $query->bindValue(':email', $email);
+    $query->bindValue(':id', $userId);
+    $query->execute();
+    return $query->fetchColumn() > 0;
+}
+
 function updateProfile($db, $id)
 {
-    $query = $db->prepare('UPDATE users SET email = :email, bio = :bio WHERE id = :id LIMIT 1');
+    $query = $db->prepare('UPDATE users SET bio = :bio WHERE id = :id LIMIT 1');
     $query->bindValue(':id', $id);
-    $query->bindValue(':email', $_POST['email']);
     $query->bindValue(':bio', $_POST['bio']);
     $query->execute();
 
     $query = $db->prepare('DELETE FROM verifications WHERE user_id = :user_id');
     $query->bindValue(':user_id', $id);
     $query->execute();
+}
+
+function isEmailChanged($db, $id, $email)
+{
+    $query = $db->prepare('SELECT email FROM users WHERE id = :id LIMIT 1');
+    $query->bindValue(':id', $id);
+    $query->execute();
+    return $query->fetchColumn() !== $email;
+}
+
+// Holds the new address as pending until confirmed; returns the code to confirm it
+function requestEmailChange($db, $id, $email)
+{
+    $code = bin2hex(random_bytes(32));
+    $query = $db->prepare('UPDATE users SET pending_email = :email, pending_email_code = :code, pending_email_ts = :ts WHERE id = :id LIMIT 1');
+    $query->bindValue(':id', $id);
+    $query->bindValue(':email', $email);
+    $query->bindValue(':code', $code);
+    $query->bindValue(':ts', time());
+    $query->execute();
+    return $code;
+}
+
+function confirmEmail($db, $code)
+{
+    $query = $db->prepare('SELECT id, pending_email FROM users WHERE pending_email_code = :code AND pending_email_ts > :since LIMIT 1');
+    $query->bindValue(':code', $code);
+    $query->bindValue(':since', time() - 86400); // Like other emailed codes, it works for a day
+    $query->execute();
+    $row = $query->fetch();
+    if (!$row || isEmailTaken($db, $row['pending_email'], $row['id']))
+        return FALSE;
+
+    $query = $db->prepare('UPDATE users SET email = pending_email, pending_email = NULL, pending_email_code = NULL, pending_email_ts = NULL WHERE id = :id LIMIT 1');
+    $query->bindValue(':id', $row['id']);
+    $query->execute();
+    return TRUE;
 }
 
 function updatePassword($db, $id)
@@ -1290,6 +1346,9 @@ if ($method === 'GET' && preg_match('/^(p[0-9]{1,3})?$/', $uri, $queryString)) {
     $data['code'] = $queryString[1];
     $data['is_success'] = verifyUser($db, $queryString[1]);
     render(200, 'verify', $data);
+} else if ($method === 'GET' && preg_match('/^email\/([A-Za-z0-9]{1,100})$/', $uri, $queryString)) {
+    $data['is_success'] = confirmEmail($db, $queryString[1]);
+    render(200, 'email', $data);
 } else if ($method === 'GET' && preg_match('/^profile\/([0-9]{1,100})$/', $uri, $queryString)) {
     getProfile($db, $queryString[1], $data);
     $Parsedown = new ForumMarkdown();
@@ -1349,10 +1408,16 @@ if ($method === 'GET' && preg_match('/^(p[0-9]{1,3})?$/', $uri, $queryString)) {
     if ($data['is_valid_code']) {
         $data['email'] = $_POST['email'];
         $data['bio'] = $_POST['bio'];
-        $data['errors'] = validateProfile($config, $baseurl);
+        $data['errors'] = validateProfile($config, $baseurl, $db, $userId);
         if (count($data['errors']) === 0) {
             updateProfile($db, $userId);
             regenerateSessionToken($db, $userId);
+            if (isEmailChanged($db, $userId, $_POST['email'])) {
+                $emailCode = requestEmailChange($db, $userId, $_POST['email']);
+                if (sendEmailChangeEmail($config, $_POST['email'], $emailCode) === FALSE)
+                    render(500, '500', $data);
+                $data['is_email_pending'] = TRUE;
+            }
             $data['is_success'] = TRUE;
         } else {
             $data['has_errors'] = TRUE;
