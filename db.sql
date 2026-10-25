@@ -7,12 +7,17 @@ CREATE TABLE "users" (
 	"notifications"	INTEGER NOT NULL DEFAULT 1,
 	"session_token"	TEXT,
 	"bio"	TEXT,
+	"pending_email"	TEXT,
+	"pending_email_code"	TEXT UNIQUE,
+	"pending_email_ts"	INTEGER,
 	PRIMARY KEY("id" AUTOINCREMENT)
 );
 
 CREATE TABLE "verifications" (
 	"code"	TEXT NOT NULL UNIQUE,
 	"user_id"	INTEGER NOT NULL,
+	"purpose"	TEXT NOT NULL DEFAULT '',
+	"ts_created"	INTEGER NOT NULL DEFAULT 0,
 	PRIMARY KEY("code")
     FOREIGN KEY("user_id") REFERENCES "users"("id") ON DELETE CASCADE
 );

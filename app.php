@@ -111,14 +111,16 @@ function checkSessionToken($baseurl, $db)
     }
 }
 
-function regenerateSessionToken($db)
+function regenerateSessionToken($db, $userId)
 {
     $token = bin2hex(random_bytes(32));
     $query = $db->prepare('UPDATE users SET session_token = :session_token WHERE id = :id');
-    $query->bindValue(':id', $_SESSION['user_id']);
+    $query->bindValue(':id', $userId);
     $query->bindValue(':session_token', $token);
     $query->execute();
-    $_SESSION['token'] = $token;
+    // Keep the current session only if it belongs to that user (e.g. not an admin editing someone else)
+    if (isset($_SESSION['user_id']) && (int) $_SESSION['user_id'] === (int) $userId)
+        $_SESSION['token'] = $token;
 }
 
 function checkCaptcha($config)
@@ -158,11 +160,11 @@ function login($db, $user)
     $_SESSION['username'] = $user['username'];
     $_SESSION['token'] = getSessionToken($db);
     if (!$_SESSION['token']) {
-        regenerateSessionToken($db);
+        regenerateSessionToken($db, $user['id']);
     }
 }
 
-function validateProfile($config, $baseurl)
+function validateProfile($config, $baseurl, $db, $userId)
 {
     $errors = [];
     if (!isset($_POST['email']) || !is_string($_POST['email']) || strlen($_POST['email']) < 3 || strlen($_POST['email']) > 50) {
@@ -173,6 +175,8 @@ function validateProfile($config, $baseurl)
         $_POST['email'] = $email;
         if (!filter_var($email, FILTER_VALIDATE_EMAIL)) {
             $errors[] = 'Email is not valid.';
+        } else if (isEmailTaken($db, $email, $userId)) {
+            $errors[] = 'Email is already in use.';
         }
     }
     if (!isset($_POST['bio']) || !is_string($_POST['bio']) || strlen($_POST['bio']) > 500) {
@@ -188,8 +192,8 @@ function validatePassword()
     $errors = [];
     $fields = ['password', 'password2'];
     foreach ($fields as $field) {
-        if (!isset($_POST[$field]) || !is_string($_POST[$field]) || strlen($_POST[$field]) < 3 || strlen($_POST[$field]) > 50) {
-            $errors[] = ucfirst(trim($field, '2')) . ' needs to be at least 3-50 characters long.';
+        if (!isset($_POST[$field]) || !is_string($_POST[$field]) || strlen($_POST[$field]) < 8 || strlen($_POST[$field]) > 50) {
+            $errors[] = ucfirst(trim($field, '2')) . ' needs to be 8-50 characters long.';
         }
     }
     if (isset($_POST['password']) && isset($_POST['password2']) && $_POST['password'] !== $_POST['password2']) {
@@ -203,8 +207,9 @@ function validateRegistration($config, $db)
     $errors = [];
     $fields = ['username', 'password', 'password2', 'email', 'answer'];
     foreach ($fields as $field) {
-        if (!isset($_POST[$field]) || !is_string($_POST[$field]) || strlen($_POST[$field]) < 3 || strlen($_POST[$field]) > 50) {
-            $errors[] = ucfirst(trim($field, '2')) . ' needs to be at least 3-50 characters long.';
+        $min = in_array($field, ['password', 'password2']) ? 8 : 3;
+        if (!isset($_POST[$field]) || !is_string($_POST[$field]) || strlen($_POST[$field]) < $min || strlen($_POST[$field]) > 50) {
+            $errors[] = ucfirst(trim($field, '2')) . " needs to be $min-50 characters long.";
         }
         if (isset($_POST[$field])) {
             $_POST[$field] = str_replace(["\r", "\n"], '', $_POST[$field]);
@@ -243,6 +248,14 @@ function validateRegistration($config, $db)
 
 function deleteUser($db, $id)
 {
+    // Remove posts one by one so threads with other people's replies pass to them instead of cascading away
+    $query = $db->prepare('SELECT id, thread_id FROM posts WHERE user_id = :user_id');
+    $query->bindValue(':user_id', $id);
+    $query->execute();
+    foreach ($query->fetchAll() as $row) {
+        removePost($db, $row['id'], $row['thread_id']);
+    }
+
     // Remove the user's uploaded files; their rows go with the user
     $query = $db->prepare('SELECT path FROM uploads WHERE user_id = :user_id');
     $query->bindValue(':user_id', $id);
@@ -275,16 +288,21 @@ function getUserByEmail($db, $email)
     return $query->fetch();
 }
 
-function generateVerification($db, $userId)
+// $purpose is 'verify', 'reset' or 'profile'; a code only works for its purpose, for a day
+function generateVerification($db, $userId, $purpose)
 {
-    $query = $db->prepare('DELETE FROM verifications WHERE user_id = :user_id');
+    // Replace only a code for the same purpose: asking for, say, a verification email mustn't cancel a reset link
+    $query = $db->prepare('DELETE FROM verifications WHERE user_id = :user_id AND purpose = :purpose');
     $query->bindValue(':user_id', $userId);
+    $query->bindValue(':purpose', $purpose);
     $query->execute();
 
     $code = bin2hex(random_bytes(32));
-    $query = $db->prepare('INSERT INTO verifications(code, user_id) VALUES(:code, :user_id)');
+    $query = $db->prepare('INSERT INTO verifications(code, user_id, purpose, ts_created) VALUES(:code, :user_id, :purpose, :ts_created)');
     $query->bindValue(':code', $code);
     $query->bindValue(':user_id', $userId);
+    $query->bindValue(':purpose', $purpose);
+    $query->bindValue(':ts_created', time());
     $query->execute();
     return $code;
 }
@@ -340,6 +358,15 @@ function sendProfileEmail($config, $email, $code)
     $content = "To edit your user profile, click the link below. If this wasn't you, ignore this email.\n\n" . $url;
     $to = [["to" => [["email" => $email]]]];
     return sendEmail($config, $to, 'Edit ' . $config['websiteTitle'] . ' Profile', $content);
+}
+
+function sendEmailChangeEmail($config, $email, $code)
+{
+    $email = filter_var($email, FILTER_SANITIZE_EMAIL);
+    $url = $config['baseurl'] . 'email/' . $code;
+    $content = "To use this address for your account, click the link below. If this wasn't you, ignore this email.\n\n" . $url;
+    $to = [["to" => [["email" => $email]]]];
+    return sendEmail($config, $to, 'Confirm your ' . $config['websiteTitle'] . ' email', $content);
 }
 
 function sendNotificationEmails($config, $db, $threadId)
@@ -400,7 +427,7 @@ function sendNotificationEmails($config, $db, $threadId)
     return sendEmail($config, $to, $subject, $content);
 }
 
-function checkVerificationCode($config, $db, $code)
+function checkVerificationCode($config, $db, $code, $purpose)
 {
     if (isset($_SESSION['user_id']) && in_array($_SESSION['username'], $config['adminUsernames'])) {
         $query = $db->prepare('SELECT id FROM users WHERE username = :code LIMIT 1');
@@ -411,8 +438,10 @@ function checkVerificationCode($config, $db, $code)
             return FALSE;
         return $userId;
     }
-    $query = $db->prepare('SELECT user_id FROM verifications WHERE code = :code LIMIT 1');
+    $query = $db->prepare('SELECT user_id FROM verifications WHERE code = :code AND purpose = :purpose AND ts_created > :since LIMIT 1');
     $query->bindValue(':code', $code);
+    $query->bindValue(':purpose', $purpose);
+    $query->bindValue(':since', time() - 86400);
     $query->execute();
     $userId = $query->fetchColumn(0);
     if (!$userId)
@@ -420,17 +449,62 @@ function checkVerificationCode($config, $db, $code)
     return $userId;
 }
 
+function isEmailTaken($db, $email, $userId)
+{
+    $query = $db->prepare('SELECT COUNT(id) FROM users WHERE email = :email AND id != :id');
+    $query->bindValue(':email', $email);
+    $query->bindValue(':id', $userId);
+    $query->execute();
+    return $query->fetchColumn() > 0;
+}
+
 function updateProfile($db, $id)
 {
-    $query = $db->prepare('UPDATE users SET email = :email, bio = :bio WHERE id = :id LIMIT 1');
+    $query = $db->prepare('UPDATE users SET bio = :bio WHERE id = :id LIMIT 1');
     $query->bindValue(':id', $id);
-    $query->bindValue(':email', $_POST['email']);
     $query->bindValue(':bio', $_POST['bio']);
     $query->execute();
 
     $query = $db->prepare('DELETE FROM verifications WHERE user_id = :user_id');
     $query->bindValue(':user_id', $id);
     $query->execute();
+}
+
+function isEmailChanged($db, $id, $email)
+{
+    $query = $db->prepare('SELECT email FROM users WHERE id = :id LIMIT 1');
+    $query->bindValue(':id', $id);
+    $query->execute();
+    return $query->fetchColumn() !== $email;
+}
+
+// Holds the new address as pending until confirmed; returns the code to confirm it
+function requestEmailChange($db, $id, $email)
+{
+    $code = bin2hex(random_bytes(32));
+    $query = $db->prepare('UPDATE users SET pending_email = :email, pending_email_code = :code, pending_email_ts = :ts WHERE id = :id LIMIT 1');
+    $query->bindValue(':id', $id);
+    $query->bindValue(':email', $email);
+    $query->bindValue(':code', $code);
+    $query->bindValue(':ts', time());
+    $query->execute();
+    return $code;
+}
+
+function confirmEmail($db, $code)
+{
+    $query = $db->prepare('SELECT id, pending_email FROM users WHERE pending_email_code = :code AND pending_email_ts > :since LIMIT 1');
+    $query->bindValue(':code', $code);
+    $query->bindValue(':since', time() - 86400); // Like other emailed codes, it works for a day
+    $query->execute();
+    $row = $query->fetch();
+    if (!$row || isEmailTaken($db, $row['pending_email'], $row['id']))
+        return FALSE;
+
+    $query = $db->prepare('UPDATE users SET email = pending_email, pending_email = NULL, pending_email_code = NULL, pending_email_ts = NULL WHERE id = :id LIMIT 1');
+    $query->bindValue(':id', $row['id']);
+    $query->execute();
+    return TRUE;
 }
 
 function updatePassword($db, $id)
@@ -496,8 +570,10 @@ function updateThread($db, $id)
 
 function verifyUser($db, $code)
 {
-    $query = $db->prepare('SELECT user_id FROM verifications WHERE code = :code LIMIT 1');
+    $query = $db->prepare('SELECT user_id FROM verifications WHERE code = :code AND purpose = :purpose AND ts_created > :since LIMIT 1');
     $query->bindValue(':code', $code);
+    $query->bindValue(':purpose', 'verify');
+    $query->bindValue(':since', time() - 86400);
     $query->execute();
     $userId = $query->fetchColumn(0);
     if (!$userId)
@@ -659,12 +735,12 @@ function getThreads($db, $page = 1, $perPage = 20, $tag = NULL)
         LEFT JOIN posts AS p ON p.thread_id = t.id
         LEFT JOIN thread_reads AS r ON r.thread_id = t.id AND r.user_id = :user_id';
     if ($tag !== NULL) {
-        $sql .= ' WHERE t.tags LIKE :tag';
+        $sql .= " WHERE ',' || t.tags || ',' LIKE :tag"; // Whole tags only: intro must not match introduction
     }
     $sql .= ' GROUP BY t.id ORDER BY t.ts_updated DESC LIMIT :limit OFFSET :offset';
     $query = $db->prepare($sql);
     if ($tag !== NULL) {
-        $query->bindValue(':tag', '%' . $tag . '%', PDO::PARAM_STR);
+        $query->bindValue(':tag', '%,' . $tag . ',%', PDO::PARAM_STR);
     }
     $query->bindValue(':limit', $perPage, PDO::PARAM_INT);
     $query->bindValue(':offset', ($page - 1) * $perPage, PDO::PARAM_INT);
@@ -699,8 +775,8 @@ function getTotalThreads($db, $tag = NULL)
 {
     if ($tag === NULL)
         return (int) $db->query('SELECT COUNT(*) FROM threads')->fetchColumn();
-    $query = $db->prepare('SELECT COUNT(*) FROM threads WHERE tags LIKE :tag');
-    $query->bindValue(':tag', '%' . $tag . '%', PDO::PARAM_STR);
+    $query = $db->prepare("SELECT COUNT(*) FROM threads WHERE ',' || tags || ',' LIKE :tag");
+    $query->bindValue(':tag', '%,' . $tag . ',%', PDO::PARAM_STR);
     $query->execute();
     return (int) $query->fetchColumn();
 }
@@ -820,8 +896,10 @@ function getThread($config, $db, $threadId, $page, $perPage, &$data)
         $content = postProcessMentions($content);
         $row['can_vote'] = !empty($_SESSION['user_id']) && $_SESSION['user_id'] !== $row['user_id'];
         $row['has_votes'] = $row['upvotes'] || $row['downvotes'];
-        $row['rabbits'] = str_repeat('🐇', $row['upvotes'] - $row['downvotes']);
+        $row['rabbits'] = str_repeat('🐇', max(0, $row['upvotes'] - $row['downvotes']));
         $row['user_upvote'] = $row['user_vote'] === 1;
+        $row['user_vote_is_upvoted'] = $row['user_vote'] === 1;
+        $row['user_vote_is_downvoted'] = $row['user_vote'] === -1;
         $row['user_vote'] = $row['user_vote'] !== NULL;
         $row['ts_updated'] = $row['ts_updated'] > $row['ts_created'] + 5 ? date('j M Y', $row['ts_updated']) : '';
         $row['ts_created'] = date('j M Y', $row['ts_created']);
@@ -874,11 +952,15 @@ function deletePost($config, $db, $id)
 
     if (!$threadId)
         return;
+    removePost($db, $id, $threadId);
+}
 
+// Delete a post, then hand its thread to the first remaining poster, or delete the thread if it is now empty
+function removePost($db, $id, $threadId)
+{
     $query = $db->prepare('DELETE FROM posts WHERE id = :id LIMIT 1');
     $query->bindValue(':id', $id);
     $query->execute();
-    $query->fetch();
 
     $query = $db->prepare('
         SELECT
@@ -907,14 +989,17 @@ function deleteThread($config, $db, $id)
     if (in_array($_SESSION['username'], $config['adminUsernames'])) {
         $query = $db->prepare('DELETE FROM threads WHERE id = :id LIMIT 1');
     } else {
-        $query = $db->prepare('DELETE FROM threads WHERE id = :id AND user_id = :user_id LIMIT 1');
+        // Authors may only delete threads nobody else has replied to
+        $query = $db->prepare('DELETE FROM threads WHERE id = :id AND user_id = :user_id
+            AND NOT EXISTS (SELECT 1 FROM posts WHERE thread_id = :id AND user_id != :user_id) LIMIT 1');
         $query->bindValue(':user_id', $_SESSION['user_id']);
     }
     $query->bindValue(':id', $id);
     $query->execute();
+    return $query->rowCount() > 0;
 }
 
-function handleUpload($config, $db)
+function handleUpload($config, $db, $data)
 {
     if (!isset($_FILES['attachment']) || $_FILES['attachment']['error'] !== UPLOAD_ERR_OK)
         render(400, '400', $data);
@@ -922,7 +1007,7 @@ function handleUpload($config, $db)
     $file = $_FILES['attachment'];
 
     if ($file['size'] > $config['maxUploadMb'] * 1024 * 1024) {
-        die('File too large.');
+        render(400, '400', $data);
     }
 
     $allowedTypes = [
@@ -972,7 +1057,8 @@ function handleUpload($config, $db)
 function recordThreadView($db, $threadId)
 {
     $key = "viewed_thread_$threadId";
-    if (!isset($_SESSION[$key])) {
+    // Only count clients that send the session cookie back: one that never does (most bots) would be a new view, and a write, on every request
+    if (!isset($_SESSION[$key]) && isset($_COOKIE[session_name()])) {
         $_SESSION[$key] = true;
         $query = $db->prepare('UPDATE threads SET views = views + 1 WHERE id = ?');
         $query->execute([$threadId]);
@@ -1224,7 +1310,7 @@ if ($method === 'GET' && preg_match('/^(p[0-9]{1,3})?$/', $uri, $queryString)) {
     $data['errors'] = validateRegistration($config, $db);
     if (count($data['errors']) === 0) {
         $userId = addUser($db);
-        $code = generateVerification($db, $userId);
+        $code = generateVerification($db, $userId, 'verify');
         if (sendVerificationEmail($config, $_POST['email'], $code) === FALSE)
             render(500, '500', $data);
         $data['is_sent'] = TRUE;
@@ -1244,7 +1330,7 @@ if ($method === 'GET' && preg_match('/^(p[0-9]{1,3})?$/', $uri, $queryString)) {
     checkCaptcha($config);
     $user = getUserByEmail($db, empty($_POST['email']) ? '' : $_POST['email']);
     if ($user) {
-        $code = generateVerification($db, $user['id']);
+        $code = generateVerification($db, $user['id'], 'reset');
         if (sendResetEmail($config, $user['email'], $code) === FALSE)
             render(500, '500', $data);
     }
@@ -1252,19 +1338,19 @@ if ($method === 'GET' && preg_match('/^(p[0-9]{1,3})?$/', $uri, $queryString)) {
     render(200, 'reset', $data);
 } else if ($method === 'GET' && preg_match('/^reset\/([A-Za-z0-9]{1,100})$/', $uri, $queryString)) {
     $data['code'] = $queryString[1];
-    $data['is_valid_code'] = (bool) checkVerificationCode($config, $db, $queryString[1]);
+    $data['is_valid_code'] = (bool) checkVerificationCode($config, $db, $queryString[1], 'reset');
     render(200, 'reset', $data);
 } else if ($method === 'POST' && preg_match('/^reset\/([A-Za-z0-9]{1,100})$/', $uri, $queryString)) {
     checkCsrf($data);
     checkRateLimit($config, $data, 'reset', 3, 300);
     $data['code'] = $queryString[1];
-    $userId = checkVerificationCode($config, $db, $queryString[1]);
+    $userId = checkVerificationCode($config, $db, $queryString[1], 'reset');
     $data['is_valid_code'] = (bool) $userId;
     if ($data['is_valid_code']) {
         $data['errors'] = validatePassword();
         if (count($data['errors']) === 0) {
             updatePassword($db, $userId);
-            regenerateSessionToken($db);
+            regenerateSessionToken($db, $userId);
             $data['is_success'] = TRUE;
         }
     }
@@ -1277,7 +1363,7 @@ if ($method === 'GET' && preg_match('/^(p[0-9]{1,3})?$/', $uri, $queryString)) {
     checkCaptcha($config);
     $user = getUserByEmail($db, empty($_POST['email']) ? '' : $_POST['email']);
     if ($user) {
-        $code = generateVerification($db, $user['id']);
+        $code = generateVerification($db, $user['id'], 'verify');
         if (sendVerificationEmail($config, $user['email'], $code) === FALSE)
             render(500, '500', $data);
     }
@@ -1287,23 +1373,26 @@ if ($method === 'GET' && preg_match('/^(p[0-9]{1,3})?$/', $uri, $queryString)) {
     $data['code'] = $queryString[1];
     $data['is_success'] = verifyUser($db, $queryString[1]);
     render(200, 'verify', $data);
+} else if ($method === 'GET' && preg_match('/^email\/([A-Za-z0-9]{1,100})$/', $uri, $queryString)) {
+    $data['is_success'] = confirmEmail($db, $queryString[1]);
+    render(200, 'email', $data);
 } else if ($method === 'GET' && preg_match('/^profile\/([0-9]{1,100})$/', $uri, $queryString)) {
     getProfile($db, $queryString[1], $data);
     $Parsedown = new ForumMarkdown();
     $Parsedown->setSafeMode(true);
     $data['bio'] = $Parsedown->text($data['bio']);
     $data['posts'] = getLatestPosts($db, $queryString[1], $perPage);
-    $data['can_edit'] = isset($_SESSION['user_id']) ? $queryString[1] === $_SESSION['user_id'] || in_array($_SESSION['username'], $config['adminUsernames']) : FALSE;
+    $data['can_edit'] = isset($_SESSION['user_id']) ? (int) $queryString[1] === (int) $_SESSION['user_id'] || in_array($_SESSION['username'], $config['adminUsernames']) : FALSE;
     render(200, 'profile', $data);
 } else if ($method === 'POST' && preg_match('/^profile\/delete\/([A-Za-z0-9]{1,100})$/', $uri, $queryString)) {
     if (!$data['is_logged_in'])
         redirect($baseurl . 'login');
     checkCsrf($data);
-    $userId = checkVerificationCode($config, $db, $queryString[1]);
-    var_dump($_POST['confirm']);
+    $userId = checkVerificationCode($config, $db, $queryString[1], 'profile');
     $data['is_valid_code'] = (bool) $userId;
-    if ($data['is_valid_code'] && $_POST['confirm']) {
+    if ($data['is_valid_code'] && !empty($_POST['confirm'])) {
         deleteUser($db, $userId);
+        invalidateCache(['index', 'thread/']);
         logout();
         redirect($baseurl);
     }
@@ -1319,7 +1408,7 @@ if ($method === 'GET' && preg_match('/^(p[0-9]{1,3})?$/', $uri, $queryString)) {
     checkRateLimit($config, $data, 'profileedit', 3, 300);
     $user = getUserByEmail($db, empty($_POST['email']) ? '' : $_POST['email']);
     if ($user) {
-        $code = generateVerification($db, $user['id']);
+        $code = generateVerification($db, $user['id'], 'profile');
         if (sendProfileEmail($config, $user['email'], $code) === FALSE)
             render(500, '500', $data);
     }
@@ -1329,7 +1418,7 @@ if ($method === 'GET' && preg_match('/^(p[0-9]{1,3})?$/', $uri, $queryString)) {
     if (!$data['is_logged_in'])
         redirect($baseurl . 'login');
     $data['code'] = $queryString[1];
-    $userId = checkVerificationCode($config, $db, $queryString[1]);
+    $userId = checkVerificationCode($config, $db, $queryString[1], 'profile');
     $data['is_valid_code'] = (bool) $userId;
     if ($data['is_valid_code']) {
         getProfile($db, $userId, $data);
@@ -1341,15 +1430,21 @@ if ($method === 'GET' && preg_match('/^(p[0-9]{1,3})?$/', $uri, $queryString)) {
     checkCsrf($data);
     checkRateLimit($config, $data, 'profileedit', 3, 300);
     $data['code'] = $queryString[1];
-    $userId = checkVerificationCode($config, $db, $queryString[1]);
+    $userId = checkVerificationCode($config, $db, $queryString[1], 'profile');
     $data['is_valid_code'] = (bool) $userId;
     if ($data['is_valid_code']) {
         $data['email'] = $_POST['email'];
         $data['bio'] = $_POST['bio'];
-        $data['errors'] = validateProfile($config, $baseurl);
+        $data['errors'] = validateProfile($config, $baseurl, $db, $userId);
         if (count($data['errors']) === 0) {
             updateProfile($db, $userId);
-            regenerateSessionToken($db);
+            regenerateSessionToken($db, $userId);
+            if (isEmailChanged($db, $userId, $_POST['email'])) {
+                $emailCode = requestEmailChange($db, $userId, $_POST['email']);
+                if (sendEmailChangeEmail($config, $_POST['email'], $emailCode) === FALSE)
+                    render(500, '500', $data);
+                $data['is_email_pending'] = TRUE;
+            }
             $data['is_success'] = TRUE;
         } else {
             $data['has_errors'] = TRUE;
@@ -1394,13 +1489,13 @@ if ($method === 'GET' && preg_match('/^(p[0-9]{1,3})?$/', $uri, $queryString)) {
     $page = (count($queryString) === 4) ? (int) substr($queryString[3], 1) : 1;
     $threadId = (int) $queryString[1];
     $cacheKey = 'thread/' . $threadId . '/p' . $page;
+    recordThreadView($db, $threadId); // Before the cache, so guests served from it are counted too
     tryRenderFromCache($cacheKey);
     getThread($config, $db, $threadId, $page, $perPage, $data);
     $totalPages = ceil(getTotalPosts($db, $threadId) / $perPage);
     $data['page'] = $page;
     $data['has_pagination'] = $totalPages > 1;
     $data['pages'] = getPaginationPages($page, $totalPages);
-    recordThreadView($db, $threadId);
     if ($data['is_logged_in']) {
         markThreadAsRead($db, $threadId);
     }
@@ -1437,6 +1532,8 @@ if ($method === 'GET' && preg_match('/^(p[0-9]{1,3})?$/', $uri, $queryString)) {
         redirect($baseurl . 'login');
     $threadId = (int) $queryString[1];
     getThread($config, $db, $threadId, 1, 1, $data);
+    if (!$data['can_edit'])
+        render(403, '403', $data);
     $data['id'] = $threadId;
     if ($method === 'GET')
         render(200, 'threadedit', $data);
@@ -1483,7 +1580,8 @@ if ($method === 'GET' && preg_match('/^(p[0-9]{1,3})?$/', $uri, $queryString)) {
     checkCsrf($data);
     checkRateLimit($config, $data, 'threaddelete', 5, 300);
     $threadId = (int) $queryString[1];
-    deleteThread($config, $db, $threadId);
+    if (!deleteThread($config, $db, $threadId))
+        render(403, '403', $data);
     invalidateCache(['index', 'thread/' . $threadId . '/p']);
     redirect($baseurl);
 } else if ($method === 'POST' && preg_match('/^post\/delete\/([0-9]{1,100})$/', $uri, $queryString)) {
@@ -1515,7 +1613,7 @@ if ($method === 'GET' && preg_match('/^(p[0-9]{1,3})?$/', $uri, $queryString)) {
         redirect($baseurl . 'login');
     checkCsrf($data);
     checkRateLimit($config, $data, 'upload', 10, 300);
-    $data['filename'] = handleUpload($config, $db);
+    $data['filename'] = handleUpload($config, $db, $data);
     if (!isset($_POST['useJS']))
         render(200, 'upload', $data);
     http_response_code(201);
@@ -1539,38 +1637,36 @@ if ($method === 'GET' && preg_match('/^(p[0-9]{1,3})?$/', $uri, $queryString)) {
         addVote($db, $postId, $vote);
     }
     $threadId = getThreadId($db, $postId);
+    invalidateCache(['thread/' . $threadId . '/p']);
     redirect($baseurl . 'thread/' . $threadId . '/p' . $page . '#' . $postId);
 } else if ($method === 'GET' && preg_match('/^mention(\/[0-9]{1,50})?\/@([A-Za-z0-9_-]{1,100})$/', $uri, $queryString)) {
-    $limit = 5;
+    if (!$data['is_logged_in'])
+        render(403, '403', $data);
+    header('Content-Type: application/json');
+    $query = str_replace('_', '\_', $queryString[2]) . '%'; // _ is a LIKE wildcard but valid in usernames
     $results = [];
-    if (count($queryString) === 3) {
+    if ($queryString[1] !== '') {
         // Prioritise usernames in thread
-        $query = $queryString[2];
-        $stmt = $db->prepare('SELECT DISTINCT u.username FROM posts AS p LEFT JOIN users AS u ON p.user_id = u.id WHERE p.thread_id = :thread_id AND u.username LIKE :query ORDER BY u.username LIMIT 5');
+        $stmt = $db->prepare("SELECT DISTINCT u.username FROM posts AS p LEFT JOIN users AS u ON p.user_id = u.id WHERE p.thread_id = :thread_id AND u.username LIKE :query ESCAPE '\\' ORDER BY u.username LIMIT 5");
         $stmt->bindValue(':thread_id', substr($queryString[1], 1));
-        $stmt->bindValue(':query', $query . '%');
+        $stmt->bindValue(':query', $query);
         $stmt->execute();
         $results = $stmt->fetchAll(PDO::FETCH_COLUMN, 0);
-        $limit = $limit - count($results);
-        if (!$limit) {
-            echo json_encode($results);
-            exit;
-        }
-    } else {
-        $query = $queryString[1];
     }
-    header('Content-Type: application/json');
-    $stmt = $db->prepare('SELECT username FROM users WHERE username LIKE :query ORDER BY username LIMIT :limit');
-    $stmt->bindValue(':query', $query . '%');
-    $stmt->bindValue(':limit', $limit);
+    $stmt = $db->prepare("SELECT username FROM users WHERE username LIKE :query ESCAPE '\\' ORDER BY username LIMIT 5");
+    $stmt->bindValue(':query', $query);
     $stmt->execute();
-    echo json_encode(array_merge($results, $stmt->fetchAll(PDO::FETCH_COLUMN, 0)));
-} else if ($method === 'GET' && $uri === 'notifications') {
+    echo json_encode(array_slice(array_values(array_unique(array_merge($results, $stmt->fetchAll(PDO::FETCH_COLUMN, 0)))), 0, 5));
+} else if (in_array($method, ['GET', 'POST']) && $uri === 'notifications') {
     if (!$data['is_logged_in'])
         redirect($baseurl . 'login');
-    $query = $db->prepare('UPDATE users SET notifications = NOT notifications WHERE id = :id LIMIT 1');
-    $query->bindValue(':id', $_SESSION['user_id'], PDO::PARAM_INT);
-    $query->execute();
+    if ($method === 'POST') {
+        checkCsrf($data);
+        $query = $db->prepare('UPDATE users SET notifications = NOT notifications WHERE id = :id LIMIT 1');
+        $query->bindValue(':id', $_SESSION['user_id'], PDO::PARAM_INT);
+        $query->execute();
+        $data['is_updated'] = TRUE;
+    }
     $query = $db->prepare('SELECT notifications FROM users WHERE id = :id LIMIT 1');
     $query->bindValue(':id', $_SESSION['user_id'], PDO::PARAM_INT);
     $query->execute();
