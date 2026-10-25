@@ -1549,7 +1549,7 @@ if ($method === 'GET' && preg_match('/^(p[0-9]{1,3})?$/', $uri, $queryString)) {
     $data['has_pagination'] = $totalPages > 1;
     $data['pages'] = getPaginationPages($page, $totalPages);
     $data['html_title'] = $data['title'];
-    render(400, 'thread', $data, $cacheKey);
+    render(400, 'thread', $data);
 } else if (in_array($method, ['GET', 'POST']) && preg_match('/^thread\/edit\/([0-9]{1,100})$/', $uri, $queryString)) {
     if (!$data['is_logged_in'])
         redirect($baseurl . 'login');
