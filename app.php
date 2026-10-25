@@ -35,7 +35,7 @@ $perPage = 25;
 $db = new \PDO('sqlite:' . __DIR__ . '/threadbare.db');
 $db->exec('PRAGMA foreign_keys = ON;');
 $method = $_SERVER['REQUEST_METHOD'];
-$uri = trim(strtok($_SERVER['REQUEST_URI'], '?'), '/'); // Route on the path; ?utm_source= etc. must not 404
+$uri = trim(parse_url($_SERVER['REQUEST_URI'], PHP_URL_PATH) ?? '', '/'); // Route on the path only, so ?utm_source= etc. don't 404
 $data = ['baseurl' => $baseurl, 'csrf' => $_SESSION['csrf'], 'captcha' => $config['hCaptchaSiteKey'], 'html_title' => $config['websiteTitle'], 'h1' => $config['websiteTitle'], 'blurb' => $config['blurb']];
 if (isset($_SESSION['username'])) {
     $data['is_logged_in'] = TRUE;
@@ -455,6 +455,8 @@ function checkVerificationCode($config, $db, $code, $purpose)
     $userId = $query->fetchColumn(0);
     if (!$userId)
         return FALSE;
+    if (isset($_SESSION['user_id']) && (int) $userId !== (int) $_SESSION['user_id'])
+        return FALSE; // A code only works for its owner: being logged in as someone else doesn't make it yours
     return $userId;
 }
 
@@ -467,7 +469,6 @@ function isEmailTaken($db, $email, $userId)
     return $query->fetchColumn() > 0;
 }
 
-// Saves the bio. A changed email is only held as pending; returns the code to confirm it, or NULL if unchanged.
 function updateProfile($db, $id)
 {
     $query = $db->prepare('UPDATE users SET bio = :bio WHERE id = :id LIMIT 1');
@@ -478,16 +479,25 @@ function updateProfile($db, $id)
     $query = $db->prepare('DELETE FROM verifications WHERE user_id = :user_id');
     $query->bindValue(':user_id', $id);
     $query->execute();
+}
 
+function isEmailChanged($db, $id, $email)
+{
     $query = $db->prepare('SELECT email FROM users WHERE id = :id LIMIT 1');
     $query->bindValue(':id', $id);
     $query->execute();
-    $code = $query->fetchColumn() === $_POST['email'] ? NULL : bin2hex(random_bytes(32));
+    return $query->fetchColumn() !== $email;
+}
+
+// Holds the new address as pending until confirmed; returns the code to confirm it
+function requestEmailChange($db, $id, $email)
+{
+    $code = bin2hex(random_bytes(32));
     $query = $db->prepare('UPDATE users SET pending_email = :email, pending_email_code = :code, pending_email_ts = :ts WHERE id = :id LIMIT 1');
     $query->bindValue(':id', $id);
-    $query->bindValue(':email', $code ? $_POST['email'] : NULL); // Unchanged email cancels any pending change
+    $query->bindValue(':email', $email);
     $query->bindValue(':code', $code);
-    $query->bindValue(':ts', $code ? time() : NULL);
+    $query->bindValue(':ts', time());
     $query->execute();
     return $code;
 }
@@ -502,7 +512,7 @@ function confirmEmail($db, $code)
     if (!$row || isEmailTaken($db, $row['pending_email'], $row['id']))
         return FALSE;
 
-    $query = $db->prepare('UPDATE users SET email = pending_email, pending_email = NULL, pending_email_code = NULL WHERE id = :id LIMIT 1');
+    $query = $db->prepare('UPDATE users SET email = pending_email, pending_email = NULL, pending_email_code = NULL, pending_email_ts = NULL WHERE id = :id LIMIT 1');
     $query->bindValue(':id', $row['id']);
     $query->execute();
     return TRUE;
@@ -1274,7 +1284,7 @@ function tryRenderFromCache($key): void
 {
     if (!empty($_SESSION['user_id']))
         return;
-    $html = apcu_fetch('html_' . $key . '_' . sha1(strtok($_SERVER['REQUEST_URI'], '?')));
+    $html = apcu_fetch('html_' . $key);
     if ($html !== false) {
         echo $html;
         exit;
@@ -1283,7 +1293,7 @@ function tryRenderFromCache($key): void
 
 function saveCache($key, string $html, int $ttl = 900): void
 {
-    apcu_store('html_' . $key . '_' . sha1(strtok($_SERVER['REQUEST_URI'], '?')), $html, $ttl);
+    apcu_store('html_' . $key, $html, $ttl);
 }
 
 function invalidateCache($keys)
@@ -1423,13 +1433,14 @@ foreach ([$_GET, $_POST] as $fields) {
 
 $queryString = [];
 if ($method === 'GET' && preg_match('/^(p[0-9]{1,3})?$/', $uri, $queryString)) {
-    tryRenderFromCache('index');
     $page = (count($queryString) === 2) ? (int) substr($queryString[1], 1) : 1;
+    $cacheKey = 'index/p' . $page;
+    tryRenderFromCache($cacheKey);
     $data['threads'] = getThreads($db, $page, $perPage);
     $totalPages = ceil(getTotalThreads($db) / $perPage);
     $data['has_pagination'] = $totalPages > 1;
     $data['pages'] = getPaginationPages($page, $totalPages);
-    render(200, 'index', $data, 'index');
+    render(200, 'index', $data, $cacheKey);
 } else if ($method === 'GET' && $uri === 'tags') {
     $data['tags'] = $config['tags'];
     render(200, 'tags', $data);
@@ -1596,9 +1607,10 @@ if ($method === 'GET' && preg_match('/^(p[0-9]{1,3})?$/', $uri, $queryString)) {
         $data['bio'] = $_POST['bio'];
         $data['errors'] = validateProfile($config, $baseurl, $db, $userId);
         if (count($data['errors']) === 0) {
-            $emailCode = updateProfile($db, $userId);
+            updateProfile($db, $userId);
             regenerateSessionToken($db, $userId);
-            if ($emailCode) {
+            if (isEmailChanged($db, $userId, $_POST['email'])) {
+                $emailCode = requestEmailChange($db, $userId, $_POST['email']);
                 if (sendEmailChangeEmail($config, $_POST['email'], $emailCode) === FALSE)
                     render(500, '500', $data);
                 $data['is_email_pending'] = TRUE;
