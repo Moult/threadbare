@@ -44,7 +44,7 @@ Features:
  - Admins can edit / delete all posts / users and bypass rate limits. Admins can also move posts to other threads or split into a new thread. Trusted users bypass spam filters.
  - Aggressive caching for guests (using APCu cache).
  - Pagination.
- - Last read stats, views, last reply.
+ - Last read stats, last reply.
 
 ## Setup
 
