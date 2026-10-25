@@ -35,7 +35,7 @@ $perPage = 25;
 $db = new \PDO('sqlite:' . __DIR__ . '/threadbare.db');
 $db->exec('PRAGMA foreign_keys = ON;');
 $method = $_SERVER['REQUEST_METHOD'];
-$uri = trim($_SERVER['REQUEST_URI'], '/');
+$uri = trim(parse_url($_SERVER['REQUEST_URI'], PHP_URL_PATH) ?? '', '/'); // Route on the path only, so ?utm_source= etc. don't 404
 $data = ['baseurl' => $baseurl, 'csrf' => $_SESSION['csrf'], 'captcha' => $config['hCaptchaSiteKey'], 'html_title' => $config['websiteTitle'], 'h1' => $config['websiteTitle'], 'blurb' => $config['blurb']];
 if (isset($_SESSION['username'])) {
     $data['is_logged_in'] = TRUE;
@@ -1127,7 +1127,7 @@ function tryRenderFromCache($key): void
 {
     if (!empty($_SESSION['user_id']))
         return;
-    $html = apcu_fetch('html_' . $key . '_' . sha1($_SERVER['REQUEST_URI']));
+    $html = apcu_fetch('html_' . $key);
     if ($html !== false) {
         echo $html;
         exit;
@@ -1136,7 +1136,7 @@ function tryRenderFromCache($key): void
 
 function saveCache($key, string $html, int $ttl = 900): void
 {
-    apcu_store('html_' . $key . '_' . sha1($_SERVER['REQUEST_URI']), $html, $ttl);
+    apcu_store('html_' . $key, $html, $ttl);
 }
 
 function invalidateCache($keys)
@@ -1268,13 +1268,14 @@ checkSessionToken($baseurl, $db);
 
 $queryString = [];
 if ($method === 'GET' && preg_match('/^(p[0-9]{1,3})?$/', $uri, $queryString)) {
-    tryRenderFromCache('index');
     $page = (count($queryString) === 2) ? (int) substr($queryString[1], 1) : 1;
+    $cacheKey = 'index/p' . $page;
+    tryRenderFromCache($cacheKey);
     $data['threads'] = getThreads($db, $page, $perPage);
     $totalPages = ceil(getTotalThreads($db) / $perPage);
     $data['has_pagination'] = $totalPages > 1;
     $data['pages'] = getPaginationPages($page, $totalPages);
-    render(200, 'index', $data, 'index');
+    render(200, 'index', $data, $cacheKey);
 } else if ($method === 'GET' && $uri === 'tags') {
     $data['tags'] = $config['tags'];
     render(200, 'tags', $data);
