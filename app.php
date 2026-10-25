@@ -1530,7 +1530,7 @@ if ($method === 'GET' && preg_match('/^(p[0-9]{1,3})?$/', $uri, $queryString)) {
         $postId = addPost($db, $threadId);
         sendNotificationEmails($config, $db, $threadId);
         $totalPages = ceil(getTotalPosts($db, $threadId) / $perPage);
-        invalidateCache(['index', 'thread/' . $threadId . '/p' . $totalPages]);
+        invalidateCache(['index', 'thread/' . $threadId . '/p']); // Every page, as a reply can add a page to the page links
         redirect($baseurl . 'thread/' . $threadId . '/p' . $totalPages . '#' . $postId);
     }
     $data['has_errors'] = TRUE;
