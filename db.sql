@@ -63,3 +63,7 @@ CREATE TABLE votes (
     FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE,
     FOREIGN KEY (post_id) REFERENCES posts(id) ON DELETE CASCADE
 );
+
+CREATE INDEX posts_thread_id ON posts(thread_id);
+CREATE INDEX posts_user_id ON posts(user_id);
+CREATE INDEX votes_post_id ON votes(post_id);
