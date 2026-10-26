@@ -1,0 +1,56 @@
+<h2>Awaiting approval</h2>
+<p>Posts by new users are held until an admin approves the user. Approving a user publishes all their held posts, and their posts appear straight away from then on.</p>
+{{^pending}}
+<p>Nothing is awaiting approval.</p>
+{{/pending}}
+<ol class="posts approvals">
+{{#pending}}
+    <li class="post pending">
+        <span class="metadata">
+            by <a href="{{baseurl}}profile/{{user_id}}">{{username}}</a> ({{email}}) on <strong>{{ts_created}}</strong>
+            in <a href="{{baseurl}}thread/{{thread_id}}">{{title}}</a>
+        </span>
+        <pre>{{content}}</pre>
+        <form action="{{baseurl}}approvals/approve/{{user_id}}" method="post">
+            <input type="hidden" name="csrf" value="{{csrf}}" />
+            <input type="submit" value="Approve {{username}}" />
+        </form>
+        <form action="{{baseurl}}approvals/reject-post/{{id}}" method="post">
+            <input type="hidden" name="csrf" value="{{csrf}}" />
+            <input type="submit" value="Delete this post" />
+        </form>
+        <form action="{{baseurl}}approvals/delete-user/{{user_id}}" method="post">
+            <input type="hidden" name="csrf" value="{{csrf}}" />
+            <input type="submit" value="Delete {{username}} and all their posts" />
+        </form>
+    </li>
+{{/pending}}
+</ol>
+{{#more_pending}}
+<p>These are the first 100 of {{pending_count}} posts. Approving or deleting a user clears all of their posts.</p>
+{{/more_pending}}
+<h2 id="flagged">Flagged</h2>
+<p>Members can flag a post as offensive. Flags are anonymous: nobody, not even admins, can see who flagged a post. Edit or delete the post, or dismiss its flags if it's fine.</p>
+{{^flagged}}
+<p>No posts are flagged.</p>
+{{/flagged}}
+<ol class="posts approvals">
+{{#flagged}}
+    <li class="post">
+        <span class="metadata">
+            <strong>&#x2691; {{flags}}</strong>
+            by <a href="{{baseurl}}profile/{{user_id}}">{{username}}</a> on <strong>{{ts_created}}</strong>
+            in <a href="{{baseurl}}thread/{{thread_id}}">{{title}}</a>
+        </span>
+        <pre>{{content}}</pre>
+        <a href="{{baseurl}}post/edit/{{id}}">Edit or delete this post</a>
+        <form action="{{baseurl}}approvals/dismiss-flags/{{id}}" method="post">
+            <input type="hidden" name="csrf" value="{{csrf}}" />
+            <input type="submit" value="Dismiss flags" />
+        </form>
+    </li>
+{{/flagged}}
+</ol>
+{{#more_flagged}}
+<p>These are the 100 most flagged of {{flagged_count}} posts.</p>
+{{/more_flagged}}
