@@ -44,6 +44,16 @@ if (isset($_SESSION['username'])) {
 } else {
     $data['is_logged_in'] = FALSE;
 }
+if (isAdmin($config)) {
+    $data['is_admin'] = TRUE;
+    $data['pending_count'] = (int) $db->query('SELECT COUNT(*) FROM posts WHERE is_approved = 0')->fetchColumn();
+    $data['flagged_count'] = (int) $db->query('SELECT COUNT(DISTINCT post_id) FROM votes WHERE value = -1')->fetchColumn();
+}
+
+function isAdmin($config)
+{
+    return isset($_SESSION['username']) && in_array($_SESSION['username'], $config['adminUsernames']);
+}
 
 function generateCsrf(&$data)
 {
@@ -368,7 +378,7 @@ function sendEmailChangeEmail($config, $email, $code)
     return sendEmail($config, $to, 'Confirm your ' . $config['websiteTitle'] . ' email', $content);
 }
 
-function sendNotificationEmails($config, $db, $threadId)
+function sendNotificationEmails($config, $db, $threadId, $userId, $poster, $postContent)
 {
     $emails = [];
     $query = $db->prepare('SELECT title FROM threads WHERE id = :id LIMIT 1');
@@ -377,12 +387,12 @@ function sendNotificationEmails($config, $db, $threadId)
     $title = $query->fetchColumn(0);
 
     $query = $db->prepare('SELECT email FROM users WHERE id = :user_id LIMIT 1');
-    $query->bindValue(':user_id', $_SESSION['user_id']);
+    $query->bindValue(':user_id', $userId);
     $query->execute();
     $myEmail = $query->fetchColumn(0);
 
     // Mentions
-    preg_match_all('/@([a-zA-Z0-9_-]{1,50})/', $_POST['content'], $matches);
+    preg_match_all('/@([a-zA-Z0-9_-]{1,50})/', $postContent, $matches);
     if (!empty($matches[1])) {
         $usernames = array_unique($matches[1]);
         foreach ($usernames as $username) {
@@ -398,7 +408,7 @@ function sendNotificationEmails($config, $db, $threadId)
     }
 
     // Those in thread
-    $query = $db->prepare('SELECT DISTINCT u.email FROM posts AS p LEFT JOIN users AS u ON p.user_id = u.id WHERE p.thread_id = :thread_id AND u.notifications = 1');
+    $query = $db->prepare('SELECT DISTINCT u.email FROM posts AS p LEFT JOIN users AS u ON p.user_id = u.id WHERE p.thread_id = :thread_id AND p.is_approved = 1 AND u.notifications = 1');
     $query->bindValue(':thread_id', $threadId);
     $query->execute();
     $rawEmails = $query->fetchAll(PDO::FETCH_COLUMN, 0);
@@ -415,10 +425,10 @@ function sendNotificationEmails($config, $db, $threadId)
     $url = $config['baseurl'] . 'thread/' . $threadId . '/latest';
     $url2 = $config['baseurl'] . 'notifications';
     $title = preg_replace('/[\x00-\x1F\x7F]/u', '', $title);
-    $username = preg_replace('/[\x00-\x1F\x7F]/u', '', $_SESSION['username']);
-    $content = $username . ' has posted on the thread "' . $title . '". Check it out!' . "\n\n" . $url;
+    $poster = preg_replace('/[\x00-\x1F\x7F]/u', '', $poster);
+    $content = $poster . ' has posted on the thread "' . $title . '". Check it out!' . "\n\n" . $url;
     $content .= "\n\n" . "If you don't want notifications, sign in then visit this page:" . "\n\n" . $url2;
-    $subject = '[' . $config['websiteTitle'] . '] ' . $_SESSION['username'] . ' commented on ' . $title;
+    $subject = '[' . $config['websiteTitle'] . '] ' . $poster . ' commented on ' . $title;
     $to = [];
     foreach (array_unique($emails) as $email) {
         $to[] = ["to" => [["email" => $email]]];
@@ -545,10 +555,11 @@ function movePost($db, $id, $threadId)
     $query->bindValue(':thread_id', $threadId);
     $query->execute();
 
+    // The thread goes to the first approved poster: a held post's author mustn't get it
     $query = $db->prepare('
         SELECT
-            (SELECT user_id FROM posts WHERE thread_id = :thread_id ORDER BY id ASC LIMIT 1) AS first_user_id,
-            (SELECT user_id FROM posts WHERE thread_id = :thread_id ORDER BY id DESC LIMIT 1) AS last_user_id
+            (SELECT user_id FROM posts WHERE thread_id = :thread_id ORDER BY is_approved DESC, id ASC LIMIT 1) AS first_user_id,
+            (SELECT user_id FROM posts WHERE thread_id = :thread_id AND is_approved = 1 ORDER BY id DESC LIMIT 1) AS last_user_id
     ');
     $query->bindValue(':thread_id', $threadId, PDO::PARAM_INT);
     $query->execute();
@@ -637,16 +648,19 @@ function addThread($db)
     return $db->lastInsertId();
 }
 
-function addPost($db, $threadId)
+function addPost($db, $threadId, $isApproved)
 {
-    $query = $db->prepare('INSERT INTO posts(thread_id, user_id, content, ts_created, ts_updated) VALUES(:thread_id, :user_id, :content, :ts_created, :ts_updated)');
+    $query = $db->prepare('INSERT INTO posts(thread_id, user_id, content, ts_created, ts_updated, is_approved) VALUES(:thread_id, :user_id, :content, :ts_created, :ts_updated, :is_approved)');
     $query->bindValue(':thread_id', $threadId);
     $query->bindValue(':user_id', $_SESSION['user_id']);
     $query->bindValue(':content', $_POST['content']);
     $query->bindValue(':ts_created', time());
     $query->bindValue(':ts_updated', time());
+    $query->bindValue(':is_approved', $isApproved ? 1 : 0, PDO::PARAM_INT);
     $query->execute();
     $postId = $db->lastInsertId();
+    if (!$isApproved)
+        return $postId; // A held post doesn't bump the thread until it's approved
 
     $query = $db->prepare('UPDATE threads SET last_user_id = :user_id, ts_updated = :ts_updated WHERE id = :thread_id');
     $query->bindValue(':thread_id', $threadId);
@@ -654,6 +668,111 @@ function addPost($db, $threadId)
     $query->bindValue(':ts_updated', time());
     $query->execute();
     return $postId;
+}
+
+// Admins, trusted users and users an admin has approved post straight away; everyone else's posts are held
+function isApproved($config, $db)
+{
+    if (isAdmin($config) || in_array($_SESSION['username'], $config['trustedUsernames']))
+        return TRUE;
+    $query = $db->prepare('SELECT is_approved FROM users WHERE id = :id LIMIT 1');
+    $query->bindValue(':id', $_SESSION['user_id']);
+    $query->execute();
+    return (bool) $query->fetchColumn();
+}
+
+// Tells the admins when a user's first post is held, rather than for every post after it
+function sendApprovalRequestEmail($config, $db)
+{
+    $query = $db->prepare('SELECT COUNT(*) FROM posts WHERE user_id = :user_id AND is_approved = 0');
+    $query->bindValue(':user_id', $_SESSION['user_id']);
+    $query->execute();
+    if ($query->fetchColumn() !== 1 || !$config['adminUsernames'])
+        return;
+
+    $query = $db->prepare('SELECT email FROM users WHERE username IN (' . implode(',', array_fill(0, count($config['adminUsernames']), '?')) . ')');
+    $query->execute(array_values($config['adminUsernames']));
+    $to = [];
+    foreach ($query->fetchAll(PDO::FETCH_COLUMN, 0) as $email) {
+        $to[] = ["to" => [["email" => $email]]];
+    }
+    if (!$to)
+        return;
+    $username = preg_replace('/[\x00-\x1F\x7F]/u', '', $_SESSION['username']);
+    $content = $username . " has posted for the first time. Their posts are hidden until an admin approves them:\n\n" . $config['baseurl'] . 'approvals';
+    return sendEmail($config, $to, '[' . $config['websiteTitle'] . '] ' . $username . ' is awaiting approval', $content);
+}
+
+// Approves a user and publishes their held posts, bumping those threads and sending the notifications held back with them
+function approveUser($config, $db, $userId)
+{
+    $query = $db->prepare('SELECT username FROM users WHERE id = :id LIMIT 1');
+    $query->bindValue(':id', $userId);
+    $query->execute();
+    $username = $query->fetchColumn();
+    if (!$username)
+        return;
+
+    $query = $db->prepare('SELECT thread_id, content FROM posts WHERE user_id = :user_id AND is_approved = 0 ORDER BY id ASC');
+    $query->bindValue(':user_id', $userId);
+    $query->execute();
+    $posts = $query->fetchAll(PDO::FETCH_ASSOC);
+
+    $query = $db->prepare('UPDATE users SET is_approved = 1 WHERE id = :id LIMIT 1');
+    $query->bindValue(':id', $userId);
+    $query->execute();
+    $query = $db->prepare('UPDATE posts SET is_approved = 1 WHERE user_id = :user_id AND is_approved = 0');
+    $query->bindValue(':user_id', $userId);
+    $query->execute();
+
+    foreach (array_unique(array_column($posts, 'thread_id')) as $threadId) {
+        $query = $db->prepare('UPDATE threads SET ts_updated = :ts_updated,
+            last_user_id = (SELECT user_id FROM posts WHERE thread_id = :thread_id AND is_approved = 1 ORDER BY id DESC LIMIT 1)
+            WHERE id = :thread_id');
+        $query->bindValue(':thread_id', $threadId, PDO::PARAM_INT);
+        $query->bindValue(':ts_updated', time());
+        $query->execute();
+    }
+    foreach ($posts as $post) {
+        sendNotificationEmails($config, $db, $post['thread_id'], $userId, $username, $post['content']);
+    }
+}
+
+// Posts people have flagged, most flagged first. Who flagged them isn't shown, not even to admins
+function getFlaggedPosts($db)
+{
+    $query = $db->query('
+        SELECT p.id, p.content, p.thread_id, p.user_id, p.ts_created, u.username, t.title, COUNT(*) AS flags
+        FROM votes AS v
+        JOIN posts AS p ON v.post_id = p.id
+        JOIN users AS u ON p.user_id = u.id
+        JOIN threads AS t ON p.thread_id = t.id
+        WHERE v.value = -1
+        GROUP BY p.id
+        ORDER BY flags DESC, p.id DESC');
+    $results = [];
+    while ($row = $query->fetch(PDO::FETCH_ASSOC)) {
+        $row['ts_created'] = date('j M Y H:i', $row['ts_created']);
+        $results[] = $row;
+    }
+    return $results;
+}
+
+function getPendingPosts($db)
+{
+    $query = $db->query('
+        SELECT p.id, p.content, p.thread_id, p.user_id, p.ts_created, u.username, u.email, t.title
+        FROM posts AS p
+        JOIN users AS u ON p.user_id = u.id
+        JOIN threads AS t ON p.thread_id = t.id
+        WHERE p.is_approved = 0
+        ORDER BY p.id ASC');
+    $results = [];
+    while ($row = $query->fetch(PDO::FETCH_ASSOC)) {
+        $row['ts_created'] = date('j M Y H:i', $row['ts_created']);
+        $results[] = $row;
+    }
+    return $results;
 }
 
 function addVote($db, $postId, $vote)
@@ -698,7 +817,7 @@ function getLatestPosts($db, $userId, $perPage = 20)
         FROM posts AS p
         LEFT JOIN threads AS t ON p.thread_id = t.id
         LEFT JOIN users AS u ON t.user_id = u.id
-        WHERE p.user_id = :user_id
+        WHERE p.user_id = :user_id AND p.is_approved = 1
         GROUP BY p.id ORDER BY p.id DESC
         LIMIT :limit
     ');
@@ -739,12 +858,12 @@ function getThreads($db, $page = 1, $perPage = 20, $tag = NULL)
         FROM threads AS t
         LEFT JOIN users AS u ON t.user_id = u.id
         LEFT JOIN users AS lu ON t.last_user_id = lu.id
-        LEFT JOIN posts AS p ON p.thread_id = t.id
+        LEFT JOIN posts AS p ON p.thread_id = t.id AND p.is_approved = 1
         LEFT JOIN thread_reads AS r ON r.thread_id = t.id AND r.user_id = :user_id';
     if ($tag !== NULL) {
         $sql .= " WHERE ',' || t.tags || ',' LIKE :tag"; // Whole tags only: intro must not match introduction
     }
-    $sql .= ' GROUP BY t.id ORDER BY t.ts_updated DESC LIMIT :limit OFFSET :offset';
+    $sql .= ' GROUP BY t.id HAVING count(p.id) > 0 ORDER BY t.ts_updated DESC LIMIT :limit OFFSET :offset'; // A held new thread has no approved posts
     $query = $db->prepare($sql);
     if ($tag !== NULL) {
         $query->bindValue(':tag', '%,' . $tag . ',%', PDO::PARAM_STR);
@@ -780,18 +899,22 @@ function getThreads($db, $page = 1, $perPage = 20, $tag = NULL)
 
 function getTotalThreads($db, $tag = NULL)
 {
+    $approved = 'EXISTS (SELECT 1 FROM posts WHERE thread_id = threads.id AND is_approved = 1)';
     if ($tag === NULL)
-        return (int) $db->query('SELECT COUNT(*) FROM threads')->fetchColumn();
-    $query = $db->prepare("SELECT COUNT(*) FROM threads WHERE ',' || tags || ',' LIKE :tag");
+        return (int) $db->query("SELECT COUNT(*) FROM threads WHERE $approved")->fetchColumn();
+    $query = $db->prepare("SELECT COUNT(*) FROM threads WHERE ',' || tags || ',' LIKE :tag AND $approved");
     $query->bindValue(':tag', '%,' . $tag . ',%', PDO::PARAM_STR);
     $query->execute();
     return (int) $query->fetchColumn();
 }
 
-function getTotalPosts($db, int $threadId): int
+// Posts in a thread that the viewer can see: held posts only by their author and admins
+function getTotalPosts($config, $db, int $threadId): int
 {
-    $query = $db->prepare('SELECT COUNT(*) FROM posts WHERE thread_id = :thread_id');
+    $query = $db->prepare('SELECT COUNT(*) FROM posts WHERE thread_id = :thread_id AND (is_approved = 1 OR user_id = :user_id OR :is_admin = 1)');
     $query->bindValue(':thread_id', $threadId);
+    $query->bindValue(':user_id', $_SESSION['user_id'] ?? 0);
+    $query->bindValue(':is_admin', isAdmin($config) ? 1 : 0, PDO::PARAM_INT);
     $query->execute();
     return $query->fetchColumn(0);
 }
@@ -865,7 +988,7 @@ function getThread($config, $db, $threadId, $page, $perPage, &$data)
     $query->bindValue(':id', $threadId);
     $query->execute();
     $row = $query->fetch();
-    if (!$row)
+    if (!$row || getTotalPosts($config, $db, $threadId) === 0)
         render(404, '404', $data);
     $data['title'] = $row['title'];
     $data['tags'] = explode(',', $row['tags']);
@@ -877,20 +1000,20 @@ function getThread($config, $db, $threadId, $page, $perPage, &$data)
     $data['posts'] = [];
 
     $query = $db->prepare('
-        SELECT p.id, p.content, p.thread_id, p.user_id, u.username, u.email, p.ts_created, p.ts_updated,
-            SUM(CASE WHEN v.value = 1 THEN 1 ELSE 0 END) AS upvotes,
-            SUM(CASE WHEN v.value = -1 THEN 1 ELSE 0 END) AS downvotes,
+        SELECT p.id, p.content, p.thread_id, p.user_id, u.username, u.email, p.ts_created, p.ts_updated, p.is_approved,
+            SUM(CASE WHEN v.value = -1 THEN 1 ELSE 0 END) AS flags,
             MAX(CASE WHEN v.user_id = :user_id THEN v.value ELSE NULL END) AS user_vote
         FROM posts AS p
         LEFT JOIN users AS u ON p.user_id = u.id
         LEFT JOIN votes AS v ON p.id = v.post_id
-        WHERE p.thread_id = :id
+        WHERE p.thread_id = :id AND (p.is_approved = 1 OR p.user_id = :user_id OR :is_admin = 1)
         GROUP BY p.id
         ORDER BY p.id ASC
         LIMIT :limit OFFSET :offset
     ');
     $query->bindValue(':id', $threadId);
     $query->bindValue(':user_id', $_SESSION['user_id'] ?? 0);
+    $query->bindValue(':is_admin', isAdmin($config) ? 1 : 0, PDO::PARAM_INT);
     $query->bindValue(':limit', $perPage, PDO::PARAM_INT);
     $query->bindValue(':offset', ($page - 1) * $perPage, PDO::PARAM_INT);
     $query->execute();
@@ -901,13 +1024,11 @@ function getThread($config, $db, $threadId, $page, $perPage, &$data)
         $content = preProcessMentions($content);
         $content = $Parsedown->text($content);
         $content = postProcessMentions($content);
-        $row['can_vote'] = !empty($_SESSION['user_id']) && $_SESSION['user_id'] !== $row['user_id'];
-        $row['has_votes'] = $row['upvotes'] || $row['downvotes'];
-        $row['rabbits'] = str_repeat('🐇', max(0, $row['upvotes'] - $row['downvotes']));
-        $row['user_upvote'] = $row['user_vote'] === 1;
+        $row['can_vote'] = !empty($_SESSION['user_id']) && $_SESSION['user_id'] !== $row['user_id'] && $row['is_approved'];
+        $row['is_pending'] = !$row['is_approved'];
         $row['user_vote_is_upvoted'] = $row['user_vote'] === 1;
         $row['user_vote_is_downvoted'] = $row['user_vote'] === -1;
-        $row['user_vote'] = $row['user_vote'] !== NULL;
+        $row['flags'] = isAdmin($config) ? $row['flags'] : 0; // Flags are anonymous, and only admins see how many
         $row['ts_updated'] = $row['ts_updated'] > $row['ts_created'] + 5 ? date('j M Y', $row['ts_updated']) : '';
         $row['ts_created'] = date('j M Y', $row['ts_created']);
         $row['avatar'] = avatar($row['username']);
@@ -915,6 +1036,34 @@ function getThread($config, $db, $threadId, $page, $perPage, &$data)
         $row['content'] = $content;
         $row['can_edit'] = isset($_SESSION['user_id']) ? $row['user_id'] === $_SESSION['user_id'] || in_array($_SESSION['username'], $config['adminUsernames']) : FALSE;
         $data['posts'][] = $row;
+    }
+    addReactions($db, $data['posts']);
+}
+
+// Lists who reacted to each post, in the order they reacted. Flags (down votes) are left out: they're anonymous
+function addReactions($db, &$posts)
+{
+    $index = [];
+    foreach ($posts as $i => $post) {
+        $posts[$i]['reactions'] = [];
+        $index[$post['id']] = $i;
+    }
+    if (!$index)
+        return;
+    $query = $db->prepare('
+        SELECT v.post_id, u.id AS user_id, u.username FROM votes AS v JOIN users AS u ON v.user_id = u.id
+        WHERE v.value = 1 AND v.post_id IN (' . implode(',', array_fill(0, count($index), '?')) . ') ORDER BY v.rowid');
+    $query->execute(array_keys($index));
+    while ($row = $query->fetch()) {
+        $posts[$index[$row['post_id']]]['reactions'][] = [
+            'user_id' => $row['user_id'],
+            'username' => $row['username'],
+            'avatar' => avatar($row['username']),
+            'initial' => strtoupper($row['username'][0]),
+        ];
+    }
+    foreach ($posts as $i => $post) {
+        $posts[$i]['has_reactions'] = (bool) $post['reactions'];
     }
 }
 
@@ -969,16 +1118,17 @@ function removePost($db, $id, $threadId)
     $query->bindValue(':id', $id);
     $query->execute();
 
+    // The thread goes to the first approved poster: a held post's author mustn't get it
     $query = $db->prepare('
         SELECT
-            (SELECT user_id FROM posts WHERE thread_id = :thread_id ORDER BY id ASC LIMIT 1) AS first_user_id,
-            (SELECT user_id FROM posts WHERE thread_id = :thread_id ORDER BY id DESC LIMIT 1) AS last_user_id
+            (SELECT user_id FROM posts WHERE thread_id = :thread_id ORDER BY is_approved DESC, id ASC LIMIT 1) AS first_user_id,
+            (SELECT user_id FROM posts WHERE thread_id = :thread_id AND is_approved = 1 ORDER BY id DESC LIMIT 1) AS last_user_id
     ');
     $query->bindValue(':thread_id', $threadId, PDO::PARAM_INT);
     $query->execute();
     $row = $query->fetch(PDO::FETCH_ASSOC);
 
-    if ($row['first_user_id'] && $row['last_user_id']) {
+    if ($row['first_user_id']) { // Kept even if only held posts remain, as those may yet be approved
         $query = $db->prepare('UPDATE threads SET user_id = :user_id, last_user_id = :last_user_id WHERE id = :thread_id LIMIT 1');
         $query->bindValue(':thread_id', $threadId, PDO::PARAM_INT);
         $query->bindValue(':user_id', $row['first_user_id'], PDO::PARAM_INT);
@@ -1492,9 +1642,14 @@ if ($method === 'GET' && preg_match('/^(p[0-9]{1,3})?$/', $uri, $queryString)) {
     if (count($data['errors']) === 0) {
         checkRateLimit($config, $data, 'post-success', 5, 300);
         $threadId = addThread($db);
-        addPost($db, $threadId);
-        sendNotificationEmails($config, $db, $threadId);
-        invalidateCache(['index']);
+        if (isApproved($config, $db)) {
+            addPost($db, $threadId, TRUE);
+            sendNotificationEmails($config, $db, $threadId, $_SESSION['user_id'], $_SESSION['username'], $_POST['content']);
+            invalidateCache(['index']);
+        } else {
+            addPost($db, $threadId, FALSE);
+            sendApprovalRequestEmail($config, $db);
+        }
         redirect($baseurl . 'thread/' . $threadId);
     }
     $data['has_errors'] = TRUE;
@@ -1503,7 +1658,7 @@ if ($method === 'GET' && preg_match('/^(p[0-9]{1,3})?$/', $uri, $queryString)) {
     render(400, 'post', $data);
 } else if ($method === 'GET' && preg_match('/^thread\/([0-9]{1,50})\/latest$/', $uri, $queryString)) {
     $threadId = (int) $queryString[1];
-    $totalPages = ceil(getTotalPosts($db, $threadId) / $perPage);
+    $totalPages = ceil(getTotalPosts($config, $db, $threadId) / $perPage);
     redirect($baseurl . 'thread/' . $threadId . '/p' . $totalPages);
 } else if ($method === 'GET' && preg_match('/^thread\/([0-9]{1,50})(\/(p[0-9]{1,3})?)?$/', $uri, $queryString)) {
     $page = (count($queryString) === 4) ? (int) substr($queryString[3], 1) : 1;
@@ -1512,7 +1667,7 @@ if ($method === 'GET' && preg_match('/^(p[0-9]{1,3})?$/', $uri, $queryString)) {
     recordThreadView($db, $threadId); // Before the cache, so guests served from it are counted too
     tryRenderFromCache($cacheKey);
     getThread($config, $db, $threadId, $page, $perPage, $data);
-    $totalPages = ceil(getTotalPosts($db, $threadId) / $perPage);
+    $totalPages = ceil(getTotalPosts($config, $db, $threadId) / $perPage);
     $data['page'] = $page;
     $data['has_pagination'] = $totalPages > 1;
     $data['pages'] = getPaginationPages($page, $totalPages);
@@ -1528,25 +1683,27 @@ if ($method === 'GET' && preg_match('/^(p[0-9]{1,3})?$/', $uri, $queryString)) {
     checkCsrf($data);
     $page = (count($queryString) === 4) ? (int) substr($queryString[3], 1) : 1;
     $threadId = (int) $queryString[1];
-    $query = $db->prepare('SELECT id FROM threads WHERE id = :id LIMIT 1');
-    $query->bindValue(':id', $threadId);
-    $query->execute();
-    if (!$query->fetchColumn())
+    if (getTotalPosts($config, $db, $threadId) === 0) // Missing, or a held thread the user can't see
         render(404, '404', $data);
     $data['errors'] = [];
     validatePost($config, $baseurl, $data['errors']);
     if (count($data['errors']) === 0) {
         checkRateLimit($config, $data, 'post-success', 5, 300);
-        $postId = addPost($db, $threadId);
-        sendNotificationEmails($config, $db, $threadId);
-        $totalPages = ceil(getTotalPosts($db, $threadId) / $perPage);
-        invalidateCache(['index', 'thread/' . $threadId . '/p']); // Every page, as a reply can add a page to the page links
+        if (isApproved($config, $db)) {
+            $postId = addPost($db, $threadId, TRUE);
+            sendNotificationEmails($config, $db, $threadId, $_SESSION['user_id'], $_SESSION['username'], $_POST['content']);
+            invalidateCache(['index', 'thread/' . $threadId . '/p']); // Every page, as a reply can add a page to the page links
+        } else {
+            $postId = addPost($db, $threadId, FALSE);
+            sendApprovalRequestEmail($config, $db);
+        }
+        $totalPages = ceil(getTotalPosts($config, $db, $threadId) / $perPage);
         redirect($baseurl . 'thread/' . $threadId . '/p' . $totalPages . '#' . $postId);
     }
     $data['has_errors'] = TRUE;
     getThread($config, $db, $threadId, $page, $perPage, $data);
     $data['id'] = $threadId;
-    $totalPages = ceil(getTotalPosts($db, $threadId) / $perPage);
+    $totalPages = ceil(getTotalPosts($config, $db, $threadId) / $perPage);
     $data['page'] = $page;
     $data['has_pagination'] = $totalPages > 1;
     $data['pages'] = getPaginationPages($page, $totalPages);
@@ -1626,9 +1783,50 @@ if ($method === 'GET' && preg_match('/^(p[0-9]{1,3})?$/', $uri, $queryString)) {
     $postId = (int) $queryString[1];
     $oldThreadId = getThreadId($db, $postId);
     $newThreadId = (int) $_POST['thread_id'];
+    // A held thread must stay hidden until it's approved, so nothing can be moved into it
+    $query = $db->prepare('SELECT 1 FROM threads WHERE id = :id AND NOT EXISTS (SELECT 1 FROM posts WHERE thread_id = :id AND is_approved = 1)');
+    $query->bindValue(':id', $newThreadId);
+    $query->execute();
+    if ($query->fetchColumn())
+        render(400, '400', $data);
     movePost($db, $postId, $newThreadId);
     invalidateCache(['index', 'thread/' . $oldThreadId . '/p', 'thread/' . $newThreadId . '/p']);
     redirect($baseurl);
+} else if ($method === 'GET' && $uri === 'approvals') {
+    if (!isAdmin($config))
+        render(403, '403', $data);
+    $data['pending'] = getPendingPosts($db);
+    $data['flagged'] = getFlaggedPosts($db);
+    render(200, 'approvals', $data);
+} else if ($method === 'POST' && preg_match('/^approvals\/(approve|reject-post|delete-user|dismiss-flags)\/([0-9]{1,100})$/', $uri, $queryString)) {
+    if (!isAdmin($config))
+        render(403, '403', $data);
+    checkCsrf($data);
+    $id = (int) $queryString[2];
+    if ($queryString[1] === 'approve') {
+        approveUser($config, $db, $id);
+    } else if ($queryString[1] === 'reject-post') {
+        $query = $db->prepare('SELECT thread_id FROM posts WHERE id = :id AND is_approved = 0 LIMIT 1');
+        $query->bindValue(':id', $id);
+        $query->execute();
+        $threadId = $query->fetchColumn();
+        if ($threadId)
+            removePost($db, $id, $threadId);
+    } else if ($queryString[1] === 'dismiss-flags') {
+        $query = $db->prepare('DELETE FROM votes WHERE post_id = :id AND value = -1');
+        $query->bindValue(':id', $id);
+        $query->execute();
+    } else {
+        // Only for accounts awaiting approval: other accounts are deleted from their profile
+        $query = $db->prepare('SELECT username FROM users WHERE id = :id AND is_approved = 0 LIMIT 1');
+        $query->bindValue(':id', $id);
+        $query->execute();
+        $username = $query->fetchColumn();
+        if ($username && !in_array($username, $config['adminUsernames']) && !in_array($username, $config['trustedUsernames']))
+            deleteUser($db, $id);
+    }
+    invalidateCache(['index', 'thread/']);
+    redirect($baseurl . 'approvals');
 } else if ($method === 'GET' && $uri === 'upload') {
     if (!$data['is_logged_in'])
         redirect($baseurl . 'login');
@@ -1650,7 +1848,7 @@ if ($method === 'GET' && preg_match('/^(p[0-9]{1,3})?$/', $uri, $queryString)) {
         redirect($baseurl . 'login');
     checkCsrf($data);
     $postId = isset($_POST['post_id']) ? (int) $_POST['post_id'] : 0;
-    $query = $db->prepare('SELECT id FROM posts WHERE id = :id AND user_id != :user_id LIMIT 1');
+    $query = $db->prepare('SELECT id FROM posts WHERE id = :id AND user_id != :user_id AND is_approved = 1 LIMIT 1');
     $query->bindValue(':user_id', $_SESSION['user_id']);
     $query->bindValue(':id', $postId);
     $query->execute();
@@ -1672,13 +1870,15 @@ if ($method === 'GET' && preg_match('/^(p[0-9]{1,3})?$/', $uri, $queryString)) {
     $results = [];
     if ($queryString[1] !== '') {
         // Prioritise usernames in thread
-        $stmt = $db->prepare("SELECT DISTINCT u.username FROM posts AS p LEFT JOIN users AS u ON p.user_id = u.id WHERE p.thread_id = :thread_id AND u.username LIKE :query ESCAPE '\\' ORDER BY u.username LIMIT 5");
+        $stmt = $db->prepare("SELECT DISTINCT u.username FROM posts AS p LEFT JOIN users AS u ON p.user_id = u.id WHERE p.thread_id = :thread_id AND p.is_approved = 1 AND u.username LIKE :query ESCAPE '\\' ORDER BY u.username LIMIT 5");
         $stmt->bindValue(':thread_id', substr($queryString[1], 1));
         $stmt->bindValue(':query', $query);
         $stmt->execute();
         $results = $stmt->fetchAll(PDO::FETCH_COLUMN, 0);
     }
-    $stmt = $db->prepare("SELECT username FROM users WHERE username LIKE :query ESCAPE '\\' ORDER BY username LIMIT 5");
+    // Not people with posts awaiting approval, as those accounts are often spam
+    $stmt = $db->prepare("SELECT username FROM users WHERE username LIKE :query ESCAPE '\\'
+        AND NOT EXISTS (SELECT 1 FROM posts WHERE user_id = users.id AND is_approved = 0) ORDER BY username LIMIT 5");
     $stmt->bindValue(':query', $query);
     $stmt->execute();
     echo json_encode(array_slice(array_values(array_unique(array_merge($results, $stmt->fetchAll(PDO::FETCH_COLUMN, 0)))), 0, 5));
