@@ -10,6 +10,7 @@ CREATE TABLE "users" (
 	"pending_email"	TEXT,
 	"pending_email_code"	TEXT UNIQUE,
 	"pending_email_ts"	INTEGER,
+	"is_approved"	INTEGER NOT NULL DEFAULT 0,
 	PRIMARY KEY("id" AUTOINCREMENT)
 );
 
@@ -43,6 +44,7 @@ CREATE TABLE "posts" (
 	"content"	TEXT NOT NULL,
 	"ts_created"	INTEGER NOT NULL,
 	"ts_updated"	INTEGER NOT NULL,
+	"is_approved"	INTEGER NOT NULL DEFAULT 1,
 	PRIMARY KEY("id" AUTOINCREMENT)
     FOREIGN KEY("thread_id") REFERENCES "threads"("id") ON DELETE CASCADE,
     FOREIGN KEY("user_id") REFERENCES "users"("id") ON DELETE CASCADE
@@ -75,3 +77,8 @@ CREATE TABLE votes (
 CREATE INDEX posts_thread_id ON posts(thread_id);
 CREATE INDEX posts_user_id ON posts(user_id);
 CREATE INDEX votes_post_id ON votes(post_id);
+CREATE INDEX posts_pending ON posts(is_approved) WHERE is_approved = 0;
+CREATE INDEX threads_ts_updated ON threads(ts_updated);
+CREATE INDEX posts_thread_approved ON posts(thread_id, is_approved);
+CREATE INDEX users_username_lower ON users(LOWER(username));
+CREATE INDEX votes_flags ON votes(post_id) WHERE value = -1;
