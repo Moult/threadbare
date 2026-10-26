@@ -1101,8 +1101,8 @@ function isSpam($config, $baseurl, $content)
     $request = 'api_key=' . urlencode($config['akismetKey'])
         . '&blog=' . urlencode($baseurl)
         . '&user_ip=' . urlencode($_SERVER['REMOTE_ADDR'])
-        . '&user_agent=' . urlencode($_SERVER['HTTP_USER_AGENT'])
-        . '&referrer=' . urlencode($_SERVER['HTTP_REFERER'])
+        . '&user_agent=' . urlencode($_SERVER['HTTP_USER_AGENT'] ?? '')
+        . '&referrer=' . urlencode($_SERVER['HTTP_REFERER'] ?? '')
         . '&comment_type=comment'
         . '&comment_author=' . urlencode($_SESSION['username'])
         . '&comment_content=' . urlencode($content);
@@ -1129,7 +1129,7 @@ function isSpam($config, $baseurl, $content)
         fclose($fs);
         $response = explode("\r\n\r\n", $response, 2);
     }
-    if ('true' === $response[1])
+    if ('true' === ($response[1] ?? '')) // Unset when Akismet couldn't be reached
         return true;
     return false;
 }
