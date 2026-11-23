@@ -10,7 +10,7 @@ return [
     'maxUploadMb' => 5,
     'salt' => 'Make up a nice long sentence here from your favourite poem',
     'cspUrls' => 'https://website.example',
-    'sessionSavePath' => '/path/to/private/session/storage/tmp/directory',
+    'sessionSavePath' => '/path/to/private/session/storage/tmp/directory', // A plain directory, not PHP's '2;/path' form
     'akismetKey' => '',
     'sendGridKey' => '',
     'hCaptchaSiteKey' => '',

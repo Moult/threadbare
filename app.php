@@ -13,9 +13,18 @@ ini_set('session.cookie_secure', str_starts_with($config['baseurl'], 'https'));
 ini_set('session.cookie_samesite', 'Strict');
 ini_set('session.use_trans_sid', 0);
 ini_set('session.cache_limiter', 'nocache');
+ini_set('session.save_handler', 'files'); // The check below looks for the session's file
 ini_set('session.save_path', $config['sessionSavePath']);
 
-session_start();
+// Each new session is a file, and a client that never keeps its cookie (most bots) would get one per request. So a
+// session is only picked up here if the visitor already has one; pages with a form start one, further down.
+$sessionId = $_COOKIE[session_name()] ?? NULL;
+if (is_string($sessionId) && preg_match('/^[A-Za-z0-9,-]{1,128}$/', $sessionId) && is_file($config['sessionSavePath'] . '/sess_' . $sessionId)) {
+    session_start();
+} else {
+    $_SESSION = [];
+    header('Cache-Control: no-store, no-cache, must-revalidate'); // As session_start() sends
+}
 
 if (empty($_SESSION['csrf']) || !is_array($_SESSION['csrf'])) {
     $_SESSION['csrf'] = [];
@@ -95,6 +104,17 @@ function clientKey($config)
 {
     $ip = clientIp($config);
     return str_contains($ip, ':') ? bin2hex(substr(inet_pton($ip), 0, 8)) : $ip;
+}
+
+// Up to 100 new sessions per visitor in 10 minutes, enough for many people sharing an address
+function startSession($config, $data)
+{
+    $key = 'ratelimit_' . md5($config['salt'] . clientKey($config) . 'session');
+    apcu_add($key, 0, 600);
+    if (apcu_inc($key) > 100)
+        render(429, '429', $data);
+    session_start();
+    $_SESSION['csrf'] = [];
 }
 
 function checkRateLimit($config, $data, $key = 'login', $limit = 3, $window = 300)
@@ -1464,7 +1484,13 @@ class ForumMarkdown extends Parsedown
     }
 }
 
-generateCsrf($data);
+// A form needs a session to remember its CSRF token. These are the pages with a form that someone not logged in can reach.
+const FORM_PAGES = '/^(login|reset|reset\/[A-Za-z0-9]{1,100}|verify)$/';
+if (session_status() !== PHP_SESSION_ACTIVE && $method === 'GET' && preg_match(FORM_PAGES, $uri))
+    startSession($config, $data);
+
+if (session_status() === PHP_SESSION_ACTIVE) // No session, no forms, so no token
+    generateCsrf($data);
 checkSessionToken($baseurl, $db);
 
 // Fields are strings, except the tags[] checkboxes; anything else would hit a TypeError (500) further on
