@@ -3,7 +3,7 @@
 source "$(dirname "$0")/../lib.sh"; start admin alice
 # spammer (id 5): verified, but not yet approved and not trusted
 php -r '$db = new PDO("sqlite:" . $argv[1]);
-  $db->prepare("INSERT INTO users(username, password, email, is_verified) VALUES(?, ?, ?, 1)")->execute(["spammer", password_hash("pw-spammer-long", PASSWORD_DEFAULT), "spammer@example.invalid"]);' "$DB"
+  $db->prepare("INSERT INTO users(username, password, email, is_verified) VALUES(?, ?, ?, 1)")->execute(["spammer", password_hash("pw-spammer-long", PASSWORD_BCRYPT, ["cost" => 4]), "spammer@example.invalid"]);' "$DB"
 login spammer
 
 P alice post 'title=Alice thread' 'content=alice op' >/dev/null  # thread 1

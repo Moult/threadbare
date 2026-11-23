@@ -25,13 +25,13 @@ EOF
     php -r '$db = new PDO("sqlite:" . $argv[1]); $db->exec(file_get_contents($argv[2]));
         foreach (["admin", "alice", "bob", "mallory"] as $u) {
             $s = $db->prepare("INSERT INTO users(username, password, email, is_verified) VALUES(?, ?, ?, 1)");
-            $s->execute([$u, password_hash("pw-$u-long", PASSWORD_DEFAULT), "$u@example.invalid"]);
+            $s->execute([$u, password_hash("pw-$u-long", PASSWORD_BCRYPT, ["cost" => (int) (getenv("TEST_HASH_COST") ?: 4)]), "$u@example.invalid"]);
         }' "$DB" "$APP/db.sql"
     # No opcache: a test may change app.php while the server runs, and opcache can keep serving the old copy
-    (cd "$APP/www" || exit 1; APCU_STUB_FILE="$WORK/apcu.json" setsid php -d opcache.enable=0 -d display_errors=0 -d log_errors=1 \
+    (cd "$APP/www" || exit 1; APCU_STUB_FILE="$WORK/apcu.json" setsid php -d opcache.enable=0 -d opcache.file_update_protection=0 -d display_errors=0 -d log_errors=1 \
         -d error_log="$WORK/php-errors.log" -S 127.0.0.1:$PORT -t "$APP/www" "$TESTS/router.php" \
         > "$WORK/server.log" 2>&1 < /dev/null & echo $! > "$WORK/server.pid")
-    for i in $(seq 50); do curl -s --noproxy '*' -o /dev/null "$B/tags" && break; sleep 0.1; done
+    for i in $(seq 250); do curl -s --noproxy '*' -o /dev/null "$B/tags" && break; sleep 0.02; done
     for u in "$@"; do login "$u"; done
 }
 

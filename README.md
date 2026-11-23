@@ -99,4 +99,4 @@ $ tests/run.sh auth       # just tests/t/auth.sh
 $ VERBOSE=1 tests/run.sh  # show every check
 ```
 
-Each test in `tests/t/` gets a fresh copy of the forum in a temporary directory, served by PHP's built-in server on port 8099 and driven with curl. Email goes to a log file and hCaptcha always passes, so no API keys are needed. APCu is used if loaded (with `apc.enable_cli=1`), otherwise a stand-in is used. GitHub Actions runs the tests on PHP 8.1-8.5 for every push and pull request.
+Each test in `tests/t/` gets a fresh copy of the forum in a temporary directory, served by PHP's built-in server and driven with curl. Tests run side by side, each on its own port (from 8099 up). Email goes to a log file, hCaptcha always passes, Akismet is never contacted and passwords are hashed cheaply, so no API keys are needed and the suite takes a few seconds. APCu is used if loaded (with `apc.enable_cli=1`), otherwise a stand-in is used. GitHub Actions runs the tests on PHP 8.1-8.5 for every push and pull request.

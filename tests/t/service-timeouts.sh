@@ -6,12 +6,14 @@ php -r '$s = stream_socket_server("tcp://127.0.0.1:" . $argv[1]); while ($c = @s
 trap "kill $! 2>/dev/null" EXIT
 export https_proxy=http://127.0.0.1:$SILENT HTTPS_PROXY=http://127.0.0.1:$SILENT
 start alice bob
-cp "$ROOT/app.php" "$APP/app.php"  # the real checkCaptcha() and sendEmail() rather than the test stubs
+# The real checkCaptcha() and sendEmail() rather than the test stubs, giving up after 0.3s rather than 10s
+sed 's/CURLOPT_TIMEOUT, 10)/CURLOPT_TIMEOUT_MS, 300)/' "$ROOT/app.php" > "$APP/app.php"
+check "both services have a timeout" "$(grep -c 'CURLOPT_TIMEOUT_MS, 300)' "$APP/app.php")" 2
 P bob post title=Waiting content=x >/dev/null
 unlimit; t=$(csrf alice login)
-s=$(C -m 30 -b "$(J alice)" -c "$(J alice)" -o /dev/null -w '%{http_code}' --data-urlencode "csrf=$t" -d content=reply "$B/thread/1")
+s=$(C -m 5 -b "$(J alice)" -c "$(J alice)" -o /dev/null -w '%{http_code}' --data-urlencode "csrf=$t" -d content=reply "$B/thread/1")
 check "reply with a notification email returns despite SendGrid not answering" "$s" 303
 unlimit; t=$(csrf guest reset)
-s=$(C -m 30 -b "$(J guest)" -c "$(J guest)" -o /dev/null -w '%{http_code}' --data-urlencode "csrf=$t" -d email=alice@example.invalid -d h-captcha-response=x "$B/reset")
+s=$(C -m 5 -b "$(J guest)" -c "$(J guest)" -o /dev/null -w '%{http_code}' --data-urlencode "csrf=$t" -d email=alice@example.invalid -d h-captcha-response=x "$B/reset")
 check "captcha check returns despite hCaptcha not answering" "$s" 403
 finish

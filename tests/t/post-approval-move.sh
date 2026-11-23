@@ -3,7 +3,7 @@
 source "$(dirname "$0")/../lib.sh"; start admin alice
 # newbie (id 5): verified, but not yet approved and not trusted
 php -r '$db = new PDO("sqlite:" . $argv[1]);
-  $db->prepare("INSERT INTO users(username, password, email, is_verified) VALUES(?, ?, ?, 1)")->execute(["newbie", password_hash("pw-newbie-long", PASSWORD_DEFAULT), "newbie@example.invalid"]);' "$DB"
+  $db->prepare("INSERT INTO users(username, password, email, is_verified) VALUES(?, ?, ?, 1)")->execute(["newbie", password_hash("pw-newbie-long", PASSWORD_BCRYPT, ["cost" => 4]), "newbie@example.invalid"]);' "$DB"
 login newbie
 
 P alice post 'title=Alice thread' 'content=alice op' >/dev/null      # thread 1, post 1
