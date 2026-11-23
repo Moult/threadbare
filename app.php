@@ -782,7 +782,8 @@ function getFlaggedPosts($db)
         JOIN threads AS t ON p.thread_id = t.id
         WHERE v.value = -1
         GROUP BY p.id
-        ORDER BY flags DESC, p.id DESC');
+        ORDER BY flags DESC, p.id DESC
+        LIMIT 100'); // A page an admin can work through, however many there are
     $results = [];
     while ($row = $query->fetch(PDO::FETCH_ASSOC)) {
         $row['ts_created'] = date('j M Y H:i', $row['ts_created']);
@@ -799,7 +800,8 @@ function getPendingPosts($db)
         JOIN users AS u ON p.user_id = u.id
         JOIN threads AS t ON p.thread_id = t.id
         WHERE p.is_approved = 0
-        ORDER BY p.id ASC');
+        ORDER BY p.id ASC
+        LIMIT 100'); // A page an admin can work through, even during a wave of spam
     $results = [];
     while ($row = $query->fetch(PDO::FETCH_ASSOC)) {
         $row['ts_created'] = date('j M Y H:i', $row['ts_created']);
@@ -1437,7 +1439,7 @@ class ForumMarkdown extends Parsedown
             ];
         }
         $mime = ['mp4' => 'video/mp4', 'webm' => 'video/webm', 'ogg' => 'video/ogg'];
-        $urlPath = strtolower(parse_url($element['element']['attributes']['href'])['path']);
+        $urlPath = strtolower((string) parse_url($element['element']['attributes']['href'], PHP_URL_PATH)); // None in http://example.com
         foreach ($mime as $ext => $mimetype) {
             if (str_ends_with($urlPath, $ext)) {
                 return [
@@ -1623,7 +1625,7 @@ if ($method === 'GET' && preg_match('/^(p[0-9]{1,3})?$/', $uri, $queryString)) {
     checkCsrf($data);
     checkRateLimit($config, $data, 'profileedit', 3, 300);
     $user = getUserByEmail($db, empty($_POST['email']) ? '' : $_POST['email']);
-    if ($user) {
+    if ($user && (int) $user['id'] === (int) $_SESSION['user_id']) { // Not anyone else's address, or this could email any member
         $code = generateVerification($db, $user['id'], 'profile');
         if (sendProfileEmail($config, $user['email'], $code) === FALSE)
             render(500, '500', $data);
@@ -1847,6 +1849,8 @@ if ($method === 'GET' && preg_match('/^(p[0-9]{1,3})?$/', $uri, $queryString)) {
         render(403, '403', $data);
     $data['pending'] = getPendingPosts($db);
     $data['flagged'] = getFlaggedPosts($db);
+    $data['more_pending'] = $data['pending_count'] > count($data['pending']);
+    $data['more_flagged'] = $data['flagged_count'] > count($data['flagged']);
     render(200, 'approvals', $data);
 } else if ($method === 'POST' && preg_match('/^approvals\/(approve|reject-post|delete-user|dismiss-flags)\/([0-9]{1,100})$/', $uri, $queryString)) {
     if (!isAdmin($config))
@@ -1886,6 +1890,15 @@ if ($method === 'GET' && preg_match('/^(p[0-9]{1,3})?$/', $uri, $queryString)) {
         redirect($baseurl . 'login');
     checkCsrf($data);
     checkRateLimit($config, $data, 'upload', 10, 300);
+    // Files nobody has vetted could fill the disk: none from users awaiting approval, and 20 a day from anyone else
+    if (!isApproved($config, $db))
+        render(403, '403', $data);
+    $query = $db->prepare('SELECT COUNT(*) FROM uploads WHERE user_id = :user_id AND ts_created > :since');
+    $query->bindValue(':user_id', $_SESSION['user_id']);
+    $query->bindValue(':since', time() - 86400);
+    $query->execute();
+    if ($query->fetchColumn() >= 20 && !isAdmin($config))
+        render(429, '429', $data);
     $data['filename'] = handleUpload($config, $db, $data);
     if (!isset($_POST['useJS']))
         render(200, 'upload', $data);
