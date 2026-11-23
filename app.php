@@ -416,10 +416,10 @@ function sendNotificationEmails($config, $db, $threadId, $userId, $poster, $post
     $query->execute();
     $myEmail = $query->fetchColumn(0);
 
-    // Mentions
+    // Mentions: only the first 20 people, as each is a lookup and an email
     preg_match_all('/@([a-zA-Z0-9_-]{1,50})/', $postContent, $matches);
     if (!empty($matches[1])) {
-        $usernames = array_unique($matches[1]);
+        $usernames = array_slice(array_unique(array_map('strtolower', $matches[1])), 0, 20);
         foreach ($usernames as $username) {
             $query = $db->prepare('SELECT email FROM users WHERE LOWER(username) = LOWER(:username) AND notifications = 1 LIMIT 1');
             $query->bindValue(':username', $username, PDO::PARAM_STR);
@@ -458,7 +458,11 @@ function sendNotificationEmails($config, $db, $threadId, $userId, $poster, $post
     foreach (array_unique($emails) as $email) {
         $to[] = ["to" => [["email" => $email]]];
     }
-    return sendEmail($config, $to, $subject, $content);
+    $sent = TRUE;
+    foreach (array_chunk($to, 1000) as $batch) { // SendGrid refuses a message to more than 1000
+        $sent = sendEmail($config, $batch, $subject, $content) && $sent;
+    }
+    return $sent;
 }
 
 function checkVerificationCode($config, $db, $code, $purpose)
@@ -879,16 +883,18 @@ function getProfile($db, $id, &$data)
 function getThreads($db, $page = 1, $perPage = 20, $tag = NULL)
 {
     $results = [];
-    $sql = 'SELECT t.id, t.title, r.last_read_at, t.user_id, u.username, t.last_user_id, lu.username AS last_username, u.email, t.ts_created, t.ts_updated, count(p.id) AS total_posts, t.tags
+    // Threads are picked before their posts are counted, as counting first would count every post in the forum
+    $sql = 'SELECT t.id, t.title, r.last_read_at, t.user_id, u.username, t.last_user_id, lu.username AS last_username, u.email, t.ts_created, t.ts_updated, t.tags,
+            (SELECT COUNT(*) FROM posts WHERE thread_id = t.id AND is_approved = 1) AS total_posts
         FROM threads AS t
         LEFT JOIN users AS u ON t.user_id = u.id
         LEFT JOIN users AS lu ON t.last_user_id = lu.id
-        LEFT JOIN posts AS p ON p.thread_id = t.id AND p.is_approved = 1
-        LEFT JOIN thread_reads AS r ON r.thread_id = t.id AND r.user_id = :user_id';
+        LEFT JOIN thread_reads AS r ON r.thread_id = t.id AND r.user_id = :user_id
+        WHERE EXISTS (SELECT 1 FROM posts WHERE thread_id = t.id AND is_approved = 1)'; // A held new thread has no approved posts
     if ($tag !== NULL) {
-        $sql .= " WHERE ',' || t.tags || ',' LIKE :tag"; // Whole tags only: intro must not match introduction
+        $sql .= " AND ',' || t.tags || ',' LIKE :tag"; // Whole tags only: intro must not match introduction
     }
-    $sql .= ' GROUP BY t.id HAVING count(p.id) > 0 ORDER BY t.ts_updated DESC LIMIT :limit OFFSET :offset'; // A held new thread has no approved posts
+    $sql .= ' ORDER BY t.ts_updated DESC LIMIT :limit OFFSET :offset';
     $query = $db->prepare($sql);
     if ($tag !== NULL) {
         $query->bindValue(':tag', '%,' . $tag . ',%', PDO::PARAM_STR);
