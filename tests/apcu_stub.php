@@ -22,15 +22,28 @@ if (!function_exists('apcu_fetch')) {
         apcu_stub_save($data);
         return TRUE;
     }
-    function apcu_delete($key)
+    function apcu_delete($key) // One key, an array of keys, or an APCUIterator
     {
         $data = apcu_stub_load();
-        unset($data[$key]);
+        foreach (is_string($key) ? [$key] : $key as $k => $v) {
+            unset($data[$key instanceof APCUIterator ? $k : $v]);
+        }
         apcu_stub_save($data);
         return TRUE;
     }
     function apcu_cache_info()
     {
+        if (str_ends_with(debug_backtrace()[0]['file'] ?? '', '/app.php')) // Tests check the forum doesn't list the cache
+            file_put_contents(getenv('APCU_STUB_FILE') . '.listed', "listed\n", FILE_APPEND);
         return ['cache_list' => array_map(fn($key) => ['info' => $key], array_keys(apcu_stub_load()))];
+    }
+    define('APC_ITER_KEY', 2);
+    class APCUIterator extends ArrayIterator // The entries whose keys match $search, by key
+    {
+        public function __construct($search = NULL, $format = APC_ITER_KEY)
+        {
+            $keys = array_keys(apcu_stub_load());
+            parent::__construct(array_fill_keys($search === NULL ? $keys : preg_grep($search, $keys), TRUE));
+        }
     }
 }
