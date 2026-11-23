@@ -64,6 +64,8 @@ $ vim config.php # Add your API keys and set website URL
 
 Rate limits count visitors by IP address (IPv6 by /64). If the site is behind a CDN or reverse proxy, set `clientIpHeader` in `config.php` to the header the proxy puts the visitor's address in, or every visitor shares the proxy's limits.
 
+Cached pages and rate limit counters share APCu's memory, which is 32 MB by default. When it fills, APCu can throw everything away, rate limit counters included. Give it room for every page a guest can load (about 12 KB each) by setting `apc.shm_size=256M` in `php.ini`.
+
 Nginx:
 
 ```
